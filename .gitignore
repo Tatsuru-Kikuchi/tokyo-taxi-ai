@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Expo
+.expo/
+dist/
+*.orig.*
+web-build/
+
+# Native
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Testing
+coverage/
+
+# Production
+build/
+
+# Misc
+.DS_Store
+*.pem
+.env
+.env.local
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Firebase
+serviceAccountKey.json
+*.serviceAccountKey.json
+firebase-debug.log
+.firebase/
+
+# Logs
+logs/
+*.log
+
+# OS files
+Thumbs.db
