@@ -15,7 +15,7 @@ import {
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = 'http://localhost:3000'; // Change to your server IP
+const BACKEND_URL = 'http://10.59.111.31:3000'; // Change to your server IP
 const LINE_OA_ID = '@your_line_id'; // Add your LINE Official Account ID
 
 export default function CustomerScreen({ onSwitchMode }) {
