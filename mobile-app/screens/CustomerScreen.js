@@ -16,7 +16,7 @@ import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BACKEND_URL = 'http://10.59.111.31:3000'; // Change to your server IP
-const LINE_OA_ID = '@your_line_id'; // Add your LINE Official Account ID
+const LINE_OA_ID = '@dhai52765howdah'; // Add your LINE Official Account ID
 
 export default function CustomerScreen({ onSwitchMode }) {
   const [socket, setSocket] = useState(null);
@@ -35,7 +35,7 @@ export default function CustomerScreen({ onSwitchMode }) {
 
   const connectToBackend = () => {
     const newSocket = io(BACKEND_URL);
-    
+
     newSocket.on('connect', () => {
       setConnected(true);
       newSocket.emit('customer:connect', {
@@ -96,21 +96,21 @@ export default function CustomerScreen({ onSwitchMode }) {
 
         <View style={styles.bookingForm}>
           <Text style={styles.sectionTitle}>配車予約</Text>
-          
+
           <TextInput
             style={styles.input}
             placeholder="📍 乗車場所"
             value={pickup}
             onChangeText={setPickup}
           />
-          
+
           <TextInput
             style={styles.input}
             placeholder="🎯 目的地"
             value={destination}
             onChangeText={setDestination}
           />
-          
+
           <TouchableOpacity style={styles.bookButton} onPress={requestRide}>
             <Text style={styles.bookButtonText}>配車リクエスト</Text>
           </TouchableOpacity>

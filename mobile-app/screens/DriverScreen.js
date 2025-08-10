@@ -1,60 +1,38 @@
-const BACKEND_URL = 'http://10.59.111.31:3000';
-
-import io from 'socket.io-client';
-
-export default function DriverScreen({ onSwitchMode }) {
-  const [socket, setSocket] = useState(null);
-  
-  useEffect(() => {
-    // Add connection here if it doesn't exist
-    const newSocket = io(BACKEND_URL);
-    
-    newSocket.on('connect', () => {
-      console.log('Connected to backend');
-    });
-    
-    setSocket(newSocket);
-    
-    return () => newSocket.close();
-  }, []);
-
-
-// App.js - This is your SINGLE app file
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
   View,
   TouchableOpacity,
-  SafeAreaView,
+  // ... other imports
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Import your existing screens
-import DriverScreen from './screens/DriverScreen';  // Your existing driver code
-import CustomerScreen from './screens/CustomerScreen';  // New customer code
+import io from 'socket.io-client';
+
+const BACKEND_URL = 'http://10.59.111.31:3000';
 
 export default function DriverScreen({ onSwitchMode }) {
-  const [userType, setUserType] = useState(null); // null, 'driver', or 'customer'
-  
+  const [socket, setSocket] = useState(null);
+
   useEffect(() => {
-    // Check if user already selected their type
-    checkUserType();
+    // Add connection here if it doesn't exist
+    const newSocket = io(BACKEND_URL);
+
+    newSocket.on('connect', () => {
+      console.log('Connected to backend');
+    });
+
+    setSocket(newSocket);
+
+    return () => newSocket.close();
   }, []);
-  
-  const checkUserType = async () => {
-    const savedType = await AsyncStorage.getItem('userType');
-    if (savedType) {
-      setUserType(savedType);
-    }
-  };
-  
+
   const selectUserType = async (type) => {
     // Save their choice
     await AsyncStorage.setItem('userType', type);
     setUserType(type);
   };
-  
+
   // If they haven't chosen yet, show selection screen
   if (!userType) {
     return (
@@ -62,35 +40,35 @@ export default function DriverScreen({ onSwitchMode }) {
         <ScrollView>
     	  <View style={styles.header}>
             <Text style={styles.title}>🚗 Driver Mode</Text>
-	    <TouchableOpacity onPress={onSwitchMode} style={styles.switchButton}>
+        </View>
+	       <TouchableOpacity onPress={onSwitchMode} style={styles.switchButton}>
   	      <Text style={styles.switchText}>お客様モードへ</Text>
-	    </TouchableOpacity>
-	  </View>
+	       </TouchableOpacity>
           <Text style={styles.title}>東京AIタクシー</Text>
           <Text style={styles.subtitle}>ご利用方法を選択してください</Text>
-          
+
           {/* Customer Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.button, styles.customerButton]}
             onPress={() => selectUserType('customer')}
           >
             <Text style={styles.buttonText}>👤 お客様として利用</Text>
             <Text style={styles.buttonSubtext}>タクシーを予約する</Text>
           </TouchableOpacity>
-          
+
           {/* Driver Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.button, styles.driverButton]}
             onPress={() => selectUserType('driver')}
           >
             <Text style={styles.buttonText}>🚗 ドライバーとして利用</Text>
             <Text style={styles.buttonSubtext}>配車リクエストを受ける</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
-  
+
   // Show the appropriate screen based on their choice
   if (userType === 'driver') {
     return <DriverScreen />;  // Your existing driver interface

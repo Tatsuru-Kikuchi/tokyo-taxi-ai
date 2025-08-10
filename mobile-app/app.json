@@ -11,14 +11,15 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
-      "buildNumber": "5",
+      "buildNumber": "19",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "このアプリは、お客様とドライバーをマッチングするために位置情報を使用します",
-        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信するために位置情報を使用します",
-        "LSApplicationQueriesSchemes": ["line", "tel"]
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -27,15 +28,15 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
-      "versionCode": 4,
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
-      ]
+      "versionCode": 19
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
+      }
     }
   }
 }
