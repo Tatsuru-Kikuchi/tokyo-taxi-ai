@@ -1,4 +1,3 @@
-// CustomerScreen.js with safety checks
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -15,8 +14,9 @@ import {
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = 'http://10.59.111.31:3000';
-const LINE_OA_ID = '@dhai52765howdah';
+// CHANGE THIS TO YOUR PRODUCTION URL
+const BACKEND_URL = 'http://10.59.111.31:3000'; // Update to production URL
+const LINE_OA_ID = '@dhai52765howdah'; // Add your LINE Official Account ID
 
 export default function CustomerScreen({ onSwitchMode }) {
   const [socket, setSocket] = useState(null);
@@ -56,7 +56,7 @@ export default function CustomerScreen({ onSwitchMode }) {
 
       newSocket.on('ride:accepted', () => {
         setRideStatus('accepted');
-        Alert.alert('🚕 Driver Found!', 'Your driver is on the way!');
+        Alert.alert('🚕 ドライバーが見つかりました！', 'ドライバーが向かっています。');
       });
 
       setSocket(newSocket);
@@ -68,12 +68,12 @@ export default function CustomerScreen({ onSwitchMode }) {
 
   const requestRide = () => {
     if (!pickup || !destination) {
-      Alert.alert('Error', 'Please enter both locations');
+      Alert.alert('エラー', '乗車場所と目的地を入力してください');
       return;
     }
 
     if (!socket || !connected) {
-      Alert.alert('Connection Error', 'Not connected to server. Please try again.');
+      Alert.alert('接続エラー', 'サーバーに接続できません。もう一度お試しください。');
       return;
     }
 
@@ -88,11 +88,10 @@ export default function CustomerScreen({ onSwitchMode }) {
   const openLINE = () => {
     const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
     Linking.openURL(lineURL).catch(() => {
-      Alert.alert('Error', 'LINE app not installed or invalid ID');
+      Alert.alert('エラー', 'LINEアプリがインストールされていません');
     });
   };
 
-  // Safe switch handler
   const handleSwitch = () => {
     if (onSwitchMode) {
       onSwitchMode();
@@ -115,7 +114,11 @@ export default function CustomerScreen({ onSwitchMode }) {
         {/* Connection Status */}
         <View style={styles.statusBar}>
           <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
-          <Text>{connected ? `${onlineDrivers} drivers available` : 'Connecting...'}</Text>
+          <Text style={styles.statusText}>
+            {connected
+              ? `${onlineDrivers}名のドライバーが待機中`
+              : '接続中...'}
+          </Text>
         </View>
 
         {/* Quick Actions */}
@@ -131,7 +134,7 @@ export default function CustomerScreen({ onSwitchMode }) {
 
           <TextInput
             style={styles.input}
-            placeholder="📍 乗車場所"
+            placeholder="📍 乗車場所を入力"
             value={pickup}
             onChangeText={setPickup}
             editable={rideStatus === 'idle'}
@@ -139,7 +142,7 @@ export default function CustomerScreen({ onSwitchMode }) {
 
           <TextInput
             style={styles.input}
-            placeholder="🎯 目的地"
+            placeholder="🎯 目的地を入力"
             value={destination}
             onChangeText={setDestination}
             editable={rideStatus === 'idle'}
@@ -151,7 +154,7 @@ export default function CustomerScreen({ onSwitchMode }) {
             disabled={!connected || rideStatus !== 'idle'}
           >
             <Text style={styles.bookButtonText}>
-              {rideStatus === 'idle' ? '配車リクエスト' : '処理中...'}
+              {rideStatus === 'idle' ? '配車をリクエスト' : '処理中...'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -167,7 +170,7 @@ export default function CustomerScreen({ onSwitchMode }) {
         {rideStatus === 'accepted' && (
           <View style={styles.statusCard}>
             <Text style={styles.emoji}>🚕</Text>
-            <Text style={styles.statusText}>ドライバーが向かっています！</Text>
+            <Text style={styles.statusTitle}>ドライバーが向かっています！</Text>
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => {
@@ -222,6 +225,10 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     marginRight: 10,
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#666',
   },
   quickActions: {
     padding: 20,
@@ -278,10 +285,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
-  statusText: {
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
     marginTop: 10,
-    fontSize: 16,
-    color: '#666',
   },
   emoji: {
     fontSize: 50,

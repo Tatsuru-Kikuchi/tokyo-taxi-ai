@@ -1,11 +1,46 @@
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const socketIo = require('socket.io');
-const admin = require('firebase-admin');
-const axios = require('axios');
 require('dotenv').config();
 
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const admin = require('firebase-admin');
+const axios = require('axios');
+
+// Initialize Firebase Admin with production/development logic
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  // Production - from environment variable
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('✅ Firebase initialized with environment variable');
+  } catch (error) {
+    console.error('Failed to parse Firebase service account:', error);
+    console.log('⚠️ Running without Firebase');
+  }
+} else {
+  // Development - from file
+  try {
+    const serviceAccount = require('./serviceAccountKey.json');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('✅ Firebase initialized with local file');
+  } catch (error) {
+    console.log('⚠️ serviceAccountKey.json not found - running without Firebase');
+  }
+}
+
+// Only initialize Firestore if Firebase is initialized
+let db = null;
+if (admin.apps.length > 0) {
+  db = admin.firestore();
+  console.log('✅ Firestore connected');
+}
+
+// Create Express app
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -19,263 +54,340 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Initialize Firebase Admin
-try {
-  const serviceAccount = require('./serviceAccountKey.json');
+// OpenWeatherMap configuration
+const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
+const TOKYO_LAT = 35.6762;
+const TOKYO_LON = 139.6503;
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
-  });
-
-  console.log('✅ Firebase initialized successfully');
-} catch (error) {
-  console.error('❌ Firebase initialization error:', error.message);
-  process.exit(1);
-}
-
-const db = admin.firestore();
-
-// ============================================
-// COMMENT OUT WEATHER SERVICE FOR NOW
-// ============================================
-// const WeatherService = require('./src/services/WeatherService');
-// const weatherService = new WeatherService();
-
-// We'll add weather monitoring later
-console.log('🌧️ Weather monitoring disabled for initial testing');
-
-// ============================================
-// SOCKET.IO REAL-TIME CONNECTIONS
-// ============================================
-const activeDrivers = new Map();
-const activeCustomers = new Map();
-
-io.on('connection', (socket) => {
-  console.log('✅ New connection:', socket.id);
-
-  // Driver comes online
-  socket.on('driver-online', async (driverId) => {
-    activeDrivers.set(driverId, socket.id);
-    socket.join('drivers');
-
-    try {
-      await db.collection('drivers').doc(driverId).set({
-        status: 'online',
-        lastSeen: admin.firestore.FieldValue.serverTimestamp(),
-        socketId: socket.id
-      }, { merge: true });
-
-      console.log(`🚕 Driver ${driverId} is online`);
-      socket.emit('status', { online: true });
-    } catch (error) {
-      console.error('Error updating driver status:', error);
-    }
-  });
-
-  // Customer connects
-  socket.on('customer-connect', (customerId) => {
-    activeCustomers.set(customerId, socket.id);
-    socket.join('customers');
-    console.log(`👤 Customer ${customerId} connected`);
-    socket.emit('status', { connected: true });
-  });
-
-  // Handle ride requests
-  socket.on('request-ride', async (data) => {
-    const { customerId, pickup, dropoff } = data;
-    console.log(`🚖 New ride request from ${customerId}`);
-
-    try {
-      // Create ride request in Firestore
-      const rideRef = await db.collection('rides').add({
-        customerId,
-        pickup,
-        dropoff,
-        status: 'pending',
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      console.log(`📝 Ride created with ID: ${rideRef.id}`);
-
-      // Notify all online drivers
-      io.to('drivers').emit('new-ride-request', {
-        rideId: rideRef.id,
-        pickup,
-        dropoff
-      });
-
-      socket.emit('ride-created', {
-        rideId: rideRef.id,
-        status: 'pending'
-      });
-    } catch (error) {
-      console.error('Error creating ride:', error);
-      socket.emit('error', { message: 'Failed to create ride request' });
-    }
-  });
-
-  // Driver accepts ride
-  socket.on('accept-ride', async (data) => {
-    const { driverId, rideId } = data;
-    console.log(`✅ Driver ${driverId} accepted ride ${rideId}`);
-
-    try {
-      // Update ride status
-      await db.collection('rides').doc(rideId).update({
-        driverId,
-        status: 'accepted',
-        acceptedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      // Get ride details
-      const ride = await db.collection('rides').doc(rideId).get();
-      const rideData = ride.data();
-
-      // Notify customer
-      const customerSocket = activeCustomers.get(rideData.customerId);
-      if (customerSocket) {
-        io.to(customerSocket).emit('ride-accepted', {
-          rideId,
-          driverId
-        });
-      }
-
-      socket.emit('ride-accepted-success', { rideId });
-    } catch (error) {
-      console.error('Error accepting ride:', error);
-      socket.emit('error', { message: 'Failed to accept ride' });
-    }
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ Socket disconnected:', socket.id);
-
-    // Clean up driver connections
-    activeDrivers.forEach((socketId, driverId) => {
-      if (socketId === socket.id) {
-        activeDrivers.delete(driverId);
-        db.collection('drivers').doc(driverId).update({
-          status: 'offline',
-          lastSeen: admin.firestore.FieldValue.serverTimestamp()
-        }).catch(console.error);
-      }
-    });
-
-    // Clean up customer connections
-    activeCustomers.forEach((socketId, customerId) => {
-      if (socketId === socket.id) {
-        activeCustomers.delete(customerId);
-      }
-    });
+// REST API Routes
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'Tokyo Taxi Backend API',
+    version: '1.0.0',
+    endpoints: ['/api/health', '/api/weather/forecast', '/api/drivers/online', '/api/rides']
   });
 });
 
-// ============================================
-// REST API ENDPOINTS
-// ============================================
-
-// Health check
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: 'Tokyo AI Taxi Backend is running',
-    timestamp: new Date(),
-    connections: {
-      drivers: activeDrivers.size,
-      customers: activeCustomers.size
-    }
+  res.json({ 
+    status: 'OK', 
+    message: 'Tokyo Taxi Backend Running',
+    firebase: admin.apps.length > 0 ? 'connected' : 'not connected',
+    timestamp: new Date().toISOString()
   });
 });
 
-// Get all online drivers
-app.get('/api/drivers/online', async (req, res) => {
+// Real weather forecast endpoint
+app.get('/api/weather/forecast-real', async (req, res) => {
   try {
-    const snapshot = await db.collection('drivers')
+    if (WEATHER_API_KEY === 'YOUR_API_KEY_HERE') {
+      return res.status(400).json({ 
+        error: 'Weather API key not configured',
+        message: 'Please add your OpenWeatherMap API key'
+      });
+    }
+
+    const response = await axios.get(
+      `https://api.openweathermap.org/data/2.5/forecast?lat=${TOKYO_LAT}&lon=${TOKYO_LON}&appid=${WEATHER_API_KEY}&units=metric`
+    );
+
+    const forecasts = response.data.list.slice(0, 8).map(item => ({
+      time: new Date(item.dt * 1000).toLocaleTimeString('ja-JP'),
+      temp: Math.round(item.main.temp),
+      description: item.weather[0].description,
+      rain: item.rain ? item.rain['3h'] || 0 : 0,
+      humidity: item.main.humidity,
+      windSpeed: item.wind.speed
+    }));
+
+    const rainComing = forecasts.slice(0, 1).some(f => f.rain > 0);
+
+    res.json({
+      location: 'Tokyo',
+      current: {
+        temp: forecasts[0].temp,
+        description: forecasts[0].description,
+        humidity: forecasts[0].humidity
+      },
+      forecasts,
+      rainAlert: rainComing,
+      message: rainComing ? '雨が予想されます。需要が高まる可能性があります。' : '晴天が続く予報です。'
+    });
+
+  } catch (error) {
+    console.error('Weather API error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch weather data' });
+  }
+});
+
+// Mock weather endpoint (always works)
+app.get('/api/weather/forecast', (req, res) => {
+  const mockForecast = {
+    location: 'Tokyo',
+    current: {
+      temp: 22,
+      description: 'Partly cloudy',
+      humidity: 65
+    },
+    forecasts: [
+      { time: '15:00', temp: 22, rain: 0 },
+      { time: '16:00', temp: 21, rain: 0 },
+      { time: '17:00', temp: 20, rain: 30 },
+      { time: '18:00', temp: 19, rain: 60 },
+      { time: '19:00', temp: 19, rain: 40 },
+      { time: '20:00', temp: 18, rain: 20 }
+    ],
+    rainAlert: true,
+    message: '17:00頃から雨の予報です。需要増加が予想されます。'
+  };
+  res.json(mockForecast);
+});
+
+// Get online drivers
+app.get('/api/drivers/online', async (req, res) => {
+  if (!db) {
+    return res.json({ count: 0, drivers: [], message: 'Database not connected' });
+  }
+
+  try {
+    const driversSnapshot = await db.collection('drivers')
       .where('status', '==', 'online')
       .get();
-
+    
     const drivers = [];
-    snapshot.forEach(doc => {
+    driversSnapshot.forEach(doc => {
       drivers.push({ id: doc.id, ...doc.data() });
     });
-
-    res.json({ drivers, count: drivers.length });
+    
+    res.json({ count: drivers.length, drivers });
   } catch (error) {
     console.error('Error fetching drivers:', error);
     res.status(500).json({ error: 'Failed to fetch drivers' });
   }
 });
 
-// Get all rides
+// Get active rides
 app.get('/api/rides', async (req, res) => {
-  try {
-    const snapshot = await db.collection('rides')
-      .orderBy('createdAt', 'desc')
-      .limit(20)
-      .get();
+  if (!db) {
+    return res.json({ count: 0, rides: [], message: 'Database not connected' });
+  }
 
+  try {
+    const ridesSnapshot = await db.collection('rides')
+      .where('status', 'in', ['pending', 'accepted', 'in_progress'])
+      .get();
+    
     const rides = [];
-    snapshot.forEach(doc => {
+    ridesSnapshot.forEach(doc => {
       rides.push({ id: doc.id, ...doc.data() });
     });
-
-    res.json({ rides, count: rides.length });
+    
+    res.json({ count: rides.length, rides });
   } catch (error) {
     console.error('Error fetching rides:', error);
     res.status(500).json({ error: 'Failed to fetch rides' });
   }
 });
 
-// Simple weather endpoint (mock for now)
-app.get('/api/weather/forecast', (req, res) => {
-  res.json({
-    current: 'Cloudy',
-    rainIn30Minutes: false,
-    temperature: 22,
-    humidity: 65,
-    forecast: [
-      { time: '12:00', condition: 'Cloudy', rainProbability: 20 },
-      { time: '15:00', condition: 'Rain', rainProbability: 80 },
-      { time: '18:00', condition: 'Clear', rainProbability: 10 }
-    ]
+// WebSocket handling
+const connectedDrivers = new Map();
+const connectedCustomers = new Map();
+
+io.on('connection', (socket) => {
+  console.log('New connection:', socket.id);
+
+  // Driver connects
+  socket.on('driver:connect', async (driverData) => {
+    console.log('Driver connected:', driverData);
+    connectedDrivers.set(socket.id, {
+      ...driverData,
+      socketId: socket.id,
+      status: 'online'
+    });
+
+    // Update driver status in Firebase if available
+    if (db && driverData.driverId) {
+      try {
+        await db.collection('drivers').doc(driverData.driverId).set({
+          ...driverData,
+          status: 'online',
+          lastSeen: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (error) {
+        console.error('Error updating driver status:', error);
+      }
+    }
+
+    // Notify customers of new driver
+    io.emit('drivers:update', {
+      onlineCount: connectedDrivers.size,
+      drivers: Array.from(connectedDrivers.values())
+    });
+
+    socket.emit('driver:connected', {
+      message: 'ドライバーとして接続されました',
+      driverId: driverData.driverId || socket.id
+    });
+  });
+
+  // Customer connects
+  socket.on('customer:connect', (customerData) => {
+    console.log('Customer connected:', customerData);
+    connectedCustomers.set(socket.id, {
+      ...customerData,
+      socketId: socket.id
+    });
+
+    socket.emit('customer:connected', {
+      message: 'お客様として接続されました',
+      customerId: customerData.customerId || socket.id,
+      onlineDrivers: connectedDrivers.size
+    });
+  });
+
+  // Customer requests ride
+  socket.on('ride:request', async (rideData) => {
+    console.log('Ride requested:', rideData);
+
+    let rideId = 'ride_' + Date.now();
+
+    if (db) {
+      try {
+        const rideRef = await db.collection('rides').add({
+          ...rideData,
+          status: 'pending',
+          customerId: rideData.customerId || socket.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        rideId = rideRef.id;
+        console.log('Ride created in Firebase:', rideId);
+      } catch (error) {
+        console.error('Error creating ride in Firebase:', error);
+      }
+    }
+
+    // Notify all online drivers
+    connectedDrivers.forEach((driver, driverSocketId) => {
+      io.to(driverSocketId).emit('ride:new', {
+        rideId,
+        ...rideData,
+        estimatedFare: calculateFare(rideData.distance || 5)
+      });
+    });
+
+    // Confirm to customer
+    socket.emit('ride:requested', {
+      rideId,
+      message: '配車リクエストを近くのドライバーに送信しました',
+      status: 'pending'
+    });
+  });
+
+  // Driver accepts ride
+  socket.on('ride:accept', async (data) => {
+    console.log('Driver accepting ride:', data);
+
+    if (db) {
+      try {
+        await db.collection('rides').doc(data.rideId).update({
+          status: 'accepted',
+          driverId: data.driverId || socket.id,
+          acceptedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const rideDoc = await db.collection('rides').doc(data.rideId).get();
+        const rideData = rideDoc.data();
+
+        // Notify customer
+        connectedCustomers.forEach((customer, customerSocketId) => {
+          if (customer.customerId === rideData.customerId || customerSocketId === rideData.customerId) {
+            io.to(customerSocketId).emit('ride:accepted', {
+              rideId: data.rideId,
+              driverId: data.driverId,
+              message: 'ドライバーが配車を承諾しました！',
+              estimatedArrival: '約5分'
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Error accepting ride:', error);
+      }
+    }
+
+    // Even without DB, notify customer
+    socket.emit('ride:accept:success', {
+      rideId: data.rideId,
+      message: '配車を承諾しました'
+    });
+
+    // Notify other drivers
+    connectedDrivers.forEach((driver, driverSocketId) => {
+      if (driverSocketId !== socket.id) {
+        io.to(driverSocketId).emit('ride:taken', {
+          rideId: data.rideId
+        });
+      }
+    });
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', async () => {
+    console.log('User disconnected:', socket.id);
+
+    // Check if it was a driver
+    if (connectedDrivers.has(socket.id)) {
+      const driver = connectedDrivers.get(socket.id);
+      
+      // Update Firebase if available
+      if (db && driver.driverId) {
+        try {
+          await db.collection('drivers').doc(driver.driverId).update({
+            status: 'offline',
+            lastSeen: admin.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (error) {
+          console.error('Error updating driver offline status:', error);
+        }
+      }
+
+      connectedDrivers.delete(socket.id);
+
+      // Notify customers
+      io.emit('drivers:update', {
+        onlineCount: connectedDrivers.size,
+        drivers: Array.from(connectedDrivers.values())
+      });
+    }
+
+    // Check if it was a customer
+    if (connectedCustomers.has(socket.id)) {
+      connectedCustomers.delete(socket.id);
+    }
   });
 });
 
-// ============================================
-// ERROR HANDLING
-// ============================================
+// Helper function to calculate fare
+function calculateFare(distanceKm) {
+  const baseFare = 500; // ¥500 base
+  const perKm = 300; // ¥300 per km
+  return baseFare + (distanceKm * perKm);
+}
+
+// Error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: err.message
-  });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-// ============================================
-// START SERVER
-// ============================================
+// Start server
 const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  console.log(`🚀 Tokyo AI Taxi Backend running on port ${PORT}`);
-  console.log(`📡 WebSocket server ready`);
-  console.log(`🔥 Firebase Firestore connected`);
-  console.log(`🔗 API Health: http://localhost:${PORT}/api/health`);
-  console.log(`📱 WebSocket: ws://localhost:${PORT}`);
-  console.log('\n📋 Available endpoints:');
-  console.log(`  GET  /api/health`);
-  console.log(`  GET  /api/drivers/online`);
-  console.log(`  GET  /api/rides`);
-  console.log(`  GET  /api/weather/forecast`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚕 Tokyo Taxi Backend running on port ${PORT}`);
+  console.log(`📡 WebSocket ready for connections`);
+  console.log(`🔥 Firebase: ${db ? 'connected' : 'not connected'}`);
+  console.log(`🌦️ Weather API: ${WEATHER_API_KEY === 'YOUR_API_KEY_HERE' ? 'Not configured' : 'Configured'}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n👋 Shutting down gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
+module.exports = app;
