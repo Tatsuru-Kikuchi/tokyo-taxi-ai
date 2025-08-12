@@ -1,4 +1,4 @@
-// Customer Screen - Booking Interface
+// CustomerScreen.js with safety checks
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -15,8 +15,8 @@ import {
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = 'http://10.59.111.31:3000'; // Change to your server IP
-const LINE_OA_ID = '@dhai52765howdah'; // Add your LINE Official Account ID
+const BACKEND_URL = 'http://10.59.111.31:3000';
+const LINE_OA_ID = '@dhai52765howdah';
 
 export default function CustomerScreen({ onSwitchMode }) {
   const [socket, setSocket] = useState(null);
@@ -34,30 +34,46 @@ export default function CustomerScreen({ onSwitchMode }) {
   }, []);
 
   const connectToBackend = () => {
-    const newSocket = io(BACKEND_URL);
+    try {
+      const newSocket = io(BACKEND_URL);
 
-    newSocket.on('connect', () => {
-      setConnected(true);
-      newSocket.emit('customer:connect', {
-        customerId: 'customer_' + Math.random().toString(36).substr(2, 9)
+      newSocket.on('connect', () => {
+        console.log('Connected to backend');
+        setConnected(true);
+        newSocket.emit('customer:connect', {
+          customerId: 'customer_' + Math.random().toString(36).substr(2, 9)
+        });
       });
-    });
 
-    newSocket.on('drivers:update', (data) => {
-      setOnlineDrivers(data.onlineCount || 0);
-    });
+      newSocket.on('error', (error) => {
+        console.error('Socket error:', error);
+        setConnected(false);
+      });
 
-    newSocket.on('ride:accepted', () => {
-      setRideStatus('accepted');
-      Alert.alert('🚕 Driver Found!', 'Your driver is on the way!');
-    });
+      newSocket.on('drivers:update', (data) => {
+        setOnlineDrivers(data.onlineCount || 0);
+      });
 
-    setSocket(newSocket);
+      newSocket.on('ride:accepted', () => {
+        setRideStatus('accepted');
+        Alert.alert('🚕 Driver Found!', 'Your driver is on the way!');
+      });
+
+      setSocket(newSocket);
+    } catch (error) {
+      console.error('Connection error:', error);
+      setConnected(false);
+    }
   };
 
   const requestRide = () => {
     if (!pickup || !destination) {
       Alert.alert('Error', 'Please enter both locations');
+      return;
+    }
+
+    if (!socket || !connected) {
+      Alert.alert('Connection Error', 'Not connected to server. Please try again.');
       return;
     }
 
@@ -70,30 +86,46 @@ export default function CustomerScreen({ onSwitchMode }) {
   };
 
   const openLINE = () => {
-    Linking.openURL(`https://line.me/R/ti/p/${LINE_OA_ID}`);
+    const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+    Linking.openURL(lineURL).catch(() => {
+      Alert.alert('Error', 'LINE app not installed or invalid ID');
+    });
+  };
+
+  // Safe switch handler
+  const handleSwitch = () => {
+    if (onSwitchMode) {
+      onSwitchMode();
+    } else {
+      console.log('onSwitchMode not provided');
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView>
+        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>🚕 お客様</Text>
-          <TouchableOpacity onPress={onSwitchMode} style={styles.switchButton}>
+          <TouchableOpacity onPress={handleSwitch} style={styles.switchButton}>
             <Text style={styles.switchText}>ドライバーモードへ</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Connection Status */}
         <View style={styles.statusBar}>
           <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
-          <Text>{onlineDrivers} drivers available</Text>
+          <Text>{connected ? `${onlineDrivers} drivers available` : 'Connecting...'}</Text>
         </View>
 
+        {/* Quick Actions */}
         <View style={styles.quickActions}>
           <TouchableOpacity style={styles.actionButton} onPress={openLINE}>
             <Text style={styles.actionText}>💬 LINE予約</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Booking Form */}
         <View style={styles.bookingForm}>
           <Text style={styles.sectionTitle}>配車予約</Text>
 
@@ -102,6 +134,7 @@ export default function CustomerScreen({ onSwitchMode }) {
             placeholder="📍 乗車場所"
             value={pickup}
             onChangeText={setPickup}
+            editable={rideStatus === 'idle'}
           />
 
           <TextInput
@@ -109,24 +142,42 @@ export default function CustomerScreen({ onSwitchMode }) {
             placeholder="🎯 目的地"
             value={destination}
             onChangeText={setDestination}
+            editable={rideStatus === 'idle'}
           />
 
-          <TouchableOpacity style={styles.bookButton} onPress={requestRide}>
-            <Text style={styles.bookButtonText}>配車リクエスト</Text>
+          <TouchableOpacity
+            style={[styles.bookButton, (!connected || rideStatus !== 'idle') && styles.bookButtonDisabled]}
+            onPress={requestRide}
+            disabled={!connected || rideStatus !== 'idle'}
+          >
+            <Text style={styles.bookButtonText}>
+              {rideStatus === 'idle' ? '配車リクエスト' : '処理中...'}
+            </Text>
           </TouchableOpacity>
         </View>
 
+        {/* Status Display */}
         {rideStatus === 'requesting' && (
           <View style={styles.statusCard}>
             <ActivityIndicator size="large" color="#4CAF50" />
-            <Text>ドライバーを探しています...</Text>
+            <Text style={styles.statusText}>ドライバーを探しています...</Text>
           </View>
         )}
 
         {rideStatus === 'accepted' && (
           <View style={styles.statusCard}>
             <Text style={styles.emoji}>🚕</Text>
-            <Text>ドライバーが向かっています！</Text>
+            <Text style={styles.statusText}>ドライバーが向かっています！</Text>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => {
+                setRideStatus('idle');
+                setPickup('');
+                setDestination('');
+              }}
+            >
+              <Text style={styles.cancelButtonText}>新しい予約</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -212,6 +263,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
   },
+  bookButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
   bookButtonText: {
     color: 'white',
     fontSize: 18,
@@ -224,8 +278,24 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
+  statusText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
   emoji: {
     fontSize: 50,
     marginBottom: 10,
+  },
+  cancelButton: {
+    marginTop: 20,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    borderRadius: 5,
+  },
+  cancelButtonText: {
+    color: '#4CAF50',
+    fontSize: 14,
   },
 });

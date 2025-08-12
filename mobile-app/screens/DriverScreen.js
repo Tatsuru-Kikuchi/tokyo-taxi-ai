@@ -4,77 +4,141 @@ import {
   Text,
   View,
   TouchableOpacity,
-  // ... other imports
+  Alert,
+  ScrollView,
+  SafeAreaView
 } from 'react-native';
-
 import io from 'socket.io-client';
 
 const BACKEND_URL = 'http://10.59.111.31:3000';
 
 export default function DriverScreen({ onSwitchMode }) {
   const [socket, setSocket] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [online, setOnline] = useState(false);
+  const [currentRide, setCurrentRide] = useState(null);
+  const [earnings, setEarnings] = useState(0);
 
   useEffect(() => {
-    // Add connection here if it doesn't exist
-    const newSocket = io(BACKEND_URL);
-
-    newSocket.on('connect', () => {
-      console.log('Connected to backend');
-    });
-
-    setSocket(newSocket);
-
-    return () => newSocket.close();
+    connectToBackend();
+    return () => {
+      if (socket) socket.close();
+    };
   }, []);
 
-  const selectUserType = async (type) => {
-    // Save their choice
-    await AsyncStorage.setItem('userType', type);
-    setUserType(type);
+  const connectToBackend = () => {
+    try {
+      const newSocket = io(BACKEND_URL);
+
+      newSocket.on('connect', () => {
+        console.log('Connected to backend');
+        setConnected(true);
+      });
+
+      newSocket.on('error', (error) => {
+        console.error('Socket error:', error);
+        setConnected(false);
+      });
+
+      newSocket.on('ride:new', (ride) => {
+        Alert.alert(
+          '🆕 新しい配車リクエスト',
+          `From: ${ride.pickup}\nTo: ${ride.destination}`,
+          [
+            { text: 'Decline', style: 'cancel' },
+            { text: 'Accept', onPress: () => acceptRide(ride) }
+          ]
+        );
+      });
+
+      setSocket(newSocket);
+    } catch (error) {
+      console.error('Connection error:', error);
+    }
   };
 
-  // If they haven't chosen yet, show selection screen
-  if (!userType) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView>
-    	  <View style={styles.header}>
-            <Text style={styles.title}>🚗 Driver Mode</Text>
+  const goOnline = () => {
+    if (!socket || !connected) {
+      Alert.alert('Error', 'Not connected to server');
+      return;
+    }
+    setOnline(true);
+    socket.emit('driver:connect', {
+      driverId: 'driver_' + Math.random().toString(36).substr(2, 9),
+      name: 'Driver'
+    });
+  };
+
+  const goOffline = () => {
+    if (socket) {
+      socket.emit('driver:offline');
+    }
+    setOnline(false);
+  };
+
+  const acceptRide = (ride) => {
+    setCurrentRide(ride);
+    if (socket) {
+      socket.emit('ride:accept', { rideId: ride.rideId });
+    }
+  };
+
+  // Safe switch handler
+  const handleSwitch = () => {
+    if (onSwitchMode) {
+      onSwitchMode();
+    } else {
+      console.log('onSwitchMode not provided');
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>🚗 ドライバー</Text>
+          <TouchableOpacity onPress={handleSwitch} style={styles.switchButton}>
+            <Text style={styles.switchText}>お客様モードへ</Text>
+          </TouchableOpacity>
         </View>
-	       <TouchableOpacity onPress={onSwitchMode} style={styles.switchButton}>
-  	      <Text style={styles.switchText}>お客様モードへ</Text>
-	       </TouchableOpacity>
-          <Text style={styles.title}>東京AIタクシー</Text>
-          <Text style={styles.subtitle}>ご利用方法を選択してください</Text>
 
-          {/* Customer Button */}
+        {/* Connection Status */}
+        <View style={styles.statusBar}>
+          <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
+          <Text>{connected ? 'Connected' : 'Disconnected'}</Text>
+        </View>
+
+        {/* Online/Offline Toggle */}
+        <View style={styles.controls}>
           <TouchableOpacity
-            style={[styles.button, styles.customerButton]}
-            onPress={() => selectUserType('customer')}
+            style={[styles.toggleButton, online ? styles.offlineButton : styles.onlineButton]}
+            onPress={online ? goOffline : goOnline}
+            disabled={!connected}
           >
-            <Text style={styles.buttonText}>👤 お客様として利用</Text>
-            <Text style={styles.buttonSubtext}>タクシーを予約する</Text>
+            <Text style={styles.toggleButtonText}>
+              {online ? 'オフラインにする' : 'オンラインにする'}
+            </Text>
           </TouchableOpacity>
+        </View>
 
-          {/* Driver Button */}
-          <TouchableOpacity
-            style={[styles.button, styles.driverButton]}
-            onPress={() => selectUserType('driver')}
-          >
-            <Text style={styles.buttonText}>🚗 ドライバーとして利用</Text>
-            <Text style={styles.buttonSubtext}>配車リクエストを受ける</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+        {/* Earnings */}
+        <View style={styles.earningsCard}>
+          <Text style={styles.cardTitle}>本日の売上</Text>
+          <Text style={styles.earningsAmount}>¥{earnings.toLocaleString()}</Text>
+        </View>
 
-  // Show the appropriate screen based on their choice
-  if (userType === 'driver') {
-    return <DriverScreen />;  // Your existing driver interface
-  } else {
-    return <CustomerScreen />; // New customer interface
-  }
+        {/* Current Ride */}
+        {currentRide && (
+          <View style={styles.rideCard}>
+            <Text style={styles.cardTitle}>現在の配車</Text>
+            <Text>From: {currentRide.pickup}</Text>
+            <Text>To: {currentRide.destination}</Text>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -82,57 +146,80 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  selectionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  header: {
+    backgroundColor: 'white',
     padding: 20,
-  },
-  switchButton: {
-  position: 'absolute',
-  right: 20,
-  top: 20,
-  backgroundColor: '#4CAF50',
-  paddingHorizontal: 12,
-  paddingVertical: 6,
-  borderRadius: 5,
-  },
-  switchText: {
-  color: 'white',
-  fontSize: 12,
-  fontWeight: '600',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   title: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 10,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 40,
+  switchButton: {
+    padding: 10,
+    backgroundColor: '#4CAF50',
+    borderRadius: 5,
   },
-  button: {
-    width: '100%',
+  switchText: {
+    color: 'white',
+    fontSize: 12,
+  },
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: 'white',
+    marginTop: 1,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  controls: {
+    padding: 20,
+  },
+  toggleButton: {
     padding: 20,
     borderRadius: 10,
-    marginBottom: 15,
     alignItems: 'center',
   },
-  customerButton: {
+  onlineButton: {
     backgroundColor: '#4CAF50',
   },
-  driverButton: {
-    backgroundColor: '#2196F3',
+  offlineButton: {
+    backgroundColor: '#f44336',
   },
-  buttonText: {
+  toggleButtonText: {
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
   },
-  buttonSubtext: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    marginTop: 5,
+  earningsCard: {
+    backgroundColor: 'white',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 10,
+  },
+  cardTitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 10,
+  },
+  earningsAmount: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  rideCard: {
+    backgroundColor: '#E3F2FD',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 10,
   },
 });
