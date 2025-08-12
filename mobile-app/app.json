@@ -20,7 +20,8 @@
       "buildNumber": "28",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "このアプリは、お客様とドライバーをマッチングするために位置情報を使用します",
-        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信するために位置情報を使用します"
+        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信するために位置情報を使用します",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

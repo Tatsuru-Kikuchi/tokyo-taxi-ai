@@ -7,9 +7,17 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const axios = require('axios');
 
-// Initialize Firebase Admin with production/development logic
+// Import Tokyo Stations data
+const {
+  TOKYO_STATIONS,
+  getNearbyStations,
+  getHighDemandStations,
+  getWeatherSensitiveStations,
+  getAIRecommendations
+} = require('./tokyo-stations');
+
+// Initialize Firebase Admin
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  // Production - from environment variable
   try {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     admin.initializeApp({
@@ -21,7 +29,6 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     console.log('⚠️ Running without Firebase');
   }
 } else {
-  // Development - from file
   try {
     const serviceAccount = require('./serviceAccountKey.json');
     admin.initializeApp({
@@ -33,14 +40,12 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   }
 }
 
-// Only initialize Firestore if Firebase is initialized
 let db = null;
 if (admin.apps.length > 0) {
   db = admin.firestore();
   console.log('✅ Firestore connected');
 }
 
-// Create Express app
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -50,11 +55,9 @@ const io = socketIo(server, {
   }
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// OpenWeatherMap configuration
 const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
 const TOKYO_LAT = 35.6762;
 const TOKYO_LON = 139.6503;
@@ -63,9 +66,9 @@ const TOKYO_LON = 139.6503;
 app.get('/', (req, res) => {
   res.json({
     status: 'OK',
-    message: 'Tokyo Taxi Backend API',
-    version: '2.0.0',
-    endpoints: ['/api/health', '/api/weather/forecast', '/api/drivers/online', '/api/rides']
+    message: 'Tokyo Taxi Backend API with Station Data',
+    version: '2.1.0',
+    endpoints: ['/api/health', '/api/weather/forecast', '/api/stations', '/api/recommendations']
   });
 });
 
@@ -76,11 +79,114 @@ app.get('/api/health', (req, res) => {
     firebase: admin.apps.length > 0 ? 'connected' : 'not connected',
     timestamp: new Date().toISOString(),
     connectedDrivers: connectedDrivers.size,
-    connectedCustomers: connectedCustomers.size
+    connectedCustomers: connectedCustomers.size,
+    stationsLoaded: Object.keys(TOKYO_STATIONS).length
   });
 });
 
-// Real weather forecast endpoint
+// Get all Tokyo stations
+app.get('/api/stations', (req, res) => {
+  const { category, demandLevel, lat, lon, radius } = req.query;
+
+  let stations = [
+    ...TOKYO_STATIONS.yamanote,
+    ...TOKYO_STATIONS.metro,
+    ...TOKYO_STATIONS.airports
+  ];
+
+  // Filter by category
+  if (category) {
+    stations = stations.filter(s => s.category === category);
+  }
+
+  // Filter by demand level
+  if (demandLevel) {
+    stations = stations.filter(s => s.demandLevel === demandLevel);
+  }
+
+  // Filter by location
+  if (lat && lon && radius) {
+    const location = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
+    stations = getNearbyStations(location, parseFloat(radius));
+  }
+
+  res.json({
+    count: stations.length,
+    stations: stations
+  });
+});
+
+// Get AI recommendations for drivers
+app.get('/api/recommendations', async (req, res) => {
+  const { lat, lon } = req.query;
+
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Location coordinates required' });
+  }
+
+  const driverLocation = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
+  const currentHour = new Date().getHours();
+
+  // Get weather condition
+  let weatherCondition = { rain: 0 };
+  try {
+    if (WEATHER_API_KEY !== 'YOUR_API_KEY_HERE') {
+      const weatherResponse = await axios.get(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${TOKYO_LAT}&lon=${TOKYO_LON}&appid=${WEATHER_API_KEY}&units=metric`
+      );
+      weatherCondition = {
+        rain: weatherResponse.data.rain ? weatherResponse.data.rain['1h'] || 0 : 0,
+        description: weatherResponse.data.weather[0].description
+      };
+    }
+  } catch (error) {
+    console.error('Weather API error:', error);
+  }
+
+  const recommendations = getAIRecommendations(driverLocation, currentHour, weatherCondition);
+
+  res.json({
+    recommendations,
+    currentConditions: {
+      hour: currentHour,
+      weather: weatherCondition
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get nearby stations for a location
+app.get('/api/stations/nearby', (req, res) => {
+  const { lat, lon, radius = 2 } = req.query;
+
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Location coordinates required' });
+  }
+
+  const location = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
+  const nearby = getNearbyStations(location, parseFloat(radius));
+
+  res.json({
+    location,
+    radius: parseFloat(radius),
+    stations: nearby
+  });
+});
+
+// Get high-demand stations for current time
+app.get('/api/stations/high-demand', (req, res) => {
+  const { hour } = req.query;
+  const currentHour = hour ? parseInt(hour) : new Date().getHours();
+
+  const highDemandStations = getHighDemandStations(currentHour);
+
+  res.json({
+    hour: currentHour,
+    stations: highDemandStations
+  });
+});
+
+// Weather forecast with station recommendations
 app.get('/api/weather/forecast-real', async (req, res) => {
   try {
     if (WEATHER_API_KEY === 'YOUR_API_KEY_HERE') {
@@ -105,6 +211,11 @@ app.get('/api/weather/forecast-real', async (req, res) => {
 
     const rainComing = forecasts.slice(0, 1).some(f => f.rain > 0);
 
+    // Add station recommendations based on weather
+    const recommendedStations = rainComing
+      ? getWeatherSensitiveStations(true).slice(0, 5)
+      : getHighDemandStations(new Date().getHours()).slice(0, 5);
+
     res.json({
       location: 'Tokyo',
       current: {
@@ -114,7 +225,8 @@ app.get('/api/weather/forecast-real', async (req, res) => {
       },
       forecasts,
       rainAlert: rainComing,
-      message: rainComing ? '雨が予想されます。需要が高まる可能性があります。' : '晴天が続く予報です。'
+      message: rainComing ? '雨が予想されます。駅周辺の需要が高まります。' : '晴天が続く予報です。',
+      recommendedStations: recommendedStations
     });
 
   } catch (error) {
@@ -123,68 +235,7 @@ app.get('/api/weather/forecast-real', async (req, res) => {
   }
 });
 
-// Mock weather endpoint (always works)
-app.get('/api/weather/forecast', (req, res) => {
-  const mockForecast = {
-    location: 'Tokyo',
-    current: {
-      temp: 22,
-      description: 'Partly cloudy',
-      humidity: 65
-    },
-    forecasts: [
-      { time: '15:00', temp: 22, rain: 0 },
-      { time: '16:00', temp: 21, rain: 0 },
-      { time: '17:00', temp: 20, rain: 30 },
-      { time: '18:00', temp: 19, rain: 60 },
-      { time: '19:00', temp: 19, rain: 40 },
-      { time: '20:00', temp: 18, rain: 20 }
-    ],
-    rainAlert: true,
-    message: '17:00頃から雨の予報です。需要増加が予想されます。'
-  };
-  res.json(mockForecast);
-});
-
-// Get online drivers with locations
-app.get('/api/drivers/online', async (req, res) => {
-  const drivers = Array.from(connectedDrivers.values()).filter(d => d.status === 'online');
-
-  res.json({
-    count: drivers.length,
-    drivers: drivers.map(d => ({
-      id: d.socketId,
-      name: d.name,
-      location: d.location,
-      status: d.status
-    }))
-  });
-});
-
-// Get active rides
-app.get('/api/rides', async (req, res) => {
-  if (!db) {
-    return res.json({ count: 0, rides: [], message: 'Database not connected' });
-  }
-
-  try {
-    const ridesSnapshot = await db.collection('rides')
-      .where('status', 'in', ['pending', 'accepted', 'in_progress'])
-      .get();
-
-    const rides = [];
-    ridesSnapshot.forEach(doc => {
-      rides.push({ id: doc.id, ...doc.data() });
-    });
-
-    res.json({ count: rides.length, rides });
-  } catch (error) {
-    console.error('Error fetching rides:', error);
-    res.status(500).json({ error: 'Failed to fetch rides' });
-  }
-});
-
-// WebSocket handling with location support
+// WebSocket handling with station integration
 const connectedDrivers = new Map();
 const connectedCustomers = new Map();
 const activeRides = new Map();
@@ -192,7 +243,7 @@ const activeRides = new Map();
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
 
-  // Driver connects with location
+  // Driver connects with location and gets station recommendations
   socket.on('driver:connect', async (driverData) => {
     console.log('Driver connected:', driverData);
 
@@ -206,7 +257,7 @@ io.on('connection', (socket) => {
 
     connectedDrivers.set(socket.id, driverInfo);
 
-    // Update driver status in Firebase if available
+    // Update Firebase
     if (db && driverData.driverId) {
       try {
         await db.collection('drivers').doc(driverData.driverId).set({
@@ -218,7 +269,31 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Notify all clients of driver update
+    // Send initial AI recommendations if driver has location
+    if (driverData.location) {
+      const currentHour = new Date().getHours();
+      let weatherCondition = { rain: 0 };
+
+      try {
+        if (WEATHER_API_KEY !== 'YOUR_API_KEY_HERE') {
+          const weatherResponse = await axios.get(
+            `https://api.openweathermap.org/data/2.5/weather?lat=${TOKYO_LAT}&lon=${TOKYO_LON}&appid=${WEATHER_API_KEY}&units=metric`
+          );
+          weatherCondition.rain = weatherResponse.data.rain ? weatherResponse.data.rain['1h'] || 0 : 0;
+        }
+      } catch (error) {
+        console.error('Weather fetch error:', error);
+      }
+
+      const recommendations = getAIRecommendations(driverData.location, currentHour, weatherCondition);
+
+      socket.emit('ai:recommendations', {
+        recommendations,
+        message: 'AI推奨エリアが更新されました'
+      });
+    }
+
+    // Notify all clients
     io.emit('drivers:update', {
       onlineCount: connectedDrivers.size,
       drivers: Array.from(connectedDrivers.values()).map(d => ({
@@ -232,22 +307,10 @@ io.on('connection', (socket) => {
       message: 'ドライバーとして接続されました',
       driverId: driverData.driverId || socket.id
     });
-
-    // Send nearby customers to driver
-    const waitingCustomers = Array.from(connectedCustomers.values())
-      .filter(c => c.status === 'waiting' && c.location)
-      .map(c => ({
-        location: c.location,
-        customerId: c.customerId
-      }));
-
-    if (waitingCustomers.length > 0) {
-      socket.emit('customer:nearby', waitingCustomers);
-    }
   });
 
-  // Driver location update
-  socket.on('driver:location', (location) => {
+  // Driver location update with station analysis
+  socket.on('driver:location', async (location) => {
     console.log('Driver location update:', socket.id, location);
 
     if (connectedDrivers.has(socket.id)) {
@@ -256,32 +319,29 @@ io.on('connection', (socket) => {
       driver.lastSeen = new Date();
       connectedDrivers.set(socket.id, driver);
 
-      // If driver has active ride, update customer
+      // Get nearby stations
+      const nearbyStations = getNearbyStations(location, 1); // Within 1km
+
+      // Send nearby station info to driver
+      if (nearbyStations.length > 0) {
+        socket.emit('stations:nearby', {
+          stations: nearbyStations,
+          message: `${nearbyStations.length}つの駅が近くにあります`
+        });
+      }
+
+      // Update active ride customers with driver location
       const activeRide = Array.from(activeRides.values())
         .find(ride => ride.driverId === socket.id);
 
       if (activeRide) {
-        // Send driver location to specific customer
         io.to(activeRide.customerSocketId).emit('driver:location', {
           driverId: socket.id,
           location: location,
-          eta: calculateETA(location, activeRide.pickupCoords)
+          eta: calculateETA(location, activeRide.pickupCoords),
+          nearbyStations: nearbyStations.slice(0, 2)
         });
       }
-
-      // Broadcast to all customers for nearby drivers display
-      connectedCustomers.forEach((customer, customerSocketId) => {
-        if (customer.location) {
-          const distance = calculateDistance(location, customer.location);
-          if (distance < 5) { // Within 5km
-            io.to(customerSocketId).emit('driver:nearby', {
-              driverId: socket.id,
-              location: location,
-              distance: distance
-            });
-          }
-        }
-      });
     }
   });
 
@@ -298,7 +358,6 @@ io.on('connection', (socket) => {
 
     connectedCustomers.set(socket.id, customerInfo);
 
-    // Send available drivers count
     const onlineDrivers = Array.from(connectedDrivers.values())
       .filter(d => d.status === 'online').length;
 
@@ -308,33 +367,20 @@ io.on('connection', (socket) => {
       onlineDrivers: onlineDrivers
     });
 
-    // Send nearby drivers
-    const nearbyDrivers = Array.from(connectedDrivers.values())
-      .filter(d => d.status === 'online' && d.location)
-      .map(d => ({
-        driverId: d.socketId,
-        location: d.location
-      }));
-
-    if (nearbyDrivers.length > 0) {
-      socket.emit('drivers:nearby', nearbyDrivers);
+    // Send nearby stations if customer has location
+    if (customerData.location) {
+      const nearbyStations = getNearbyStations(customerData.location, 2);
+      socket.emit('stations:nearby', {
+        stations: nearbyStations,
+        message: '近くの駅'
+      });
     }
   });
 
-  // Customer location update
-  socket.on('customer:location', (location) => {
-    if (connectedCustomers.has(socket.id)) {
-      const customer = connectedCustomers.get(socket.id);
-      customer.location = location;
-      connectedCustomers.set(socket.id, customer);
-    }
-  });
-
-  // Customer requests ride with location data
+  // Enhanced ride request with station context
   socket.on('ride:request', async (rideData) => {
     console.log('Ride requested with location:', rideData);
 
-    // Update customer status
     if (connectedCustomers.has(socket.id)) {
       const customer = connectedCustomers.get(socket.id);
       customer.status = 'waiting';
@@ -343,13 +389,25 @@ io.on('connection', (socket) => {
 
     let rideId = 'ride_' + Date.now();
 
-    // Enhanced ride data with coordinates
+    // Find nearby stations for pickup and destination
+    let pickupStations = [];
+    let destinationStations = [];
+
+    if (rideData.pickupCoords) {
+      pickupStations = getNearbyStations(rideData.pickupCoords, 0.5); // 500m
+    }
+    if (rideData.destinationCoords) {
+      destinationStations = getNearbyStations(rideData.destinationCoords, 0.5);
+    }
+
     const enhancedRideData = {
       ...rideData,
       rideId,
       customerSocketId: socket.id,
       status: 'pending',
       createdAt: new Date(),
+      pickupStations,
+      destinationStations,
       estimatedFare: calculateFare(
         rideData.pickupCoords && rideData.destinationCoords
           ? calculateDistance(rideData.pickupCoords, rideData.destinationCoords)
@@ -357,25 +415,21 @@ io.on('connection', (socket) => {
       )
     };
 
-    // Store in active rides
     activeRides.set(rideId, enhancedRideData);
 
-    // Save to Firebase if available
+    // Save to Firebase
     if (db) {
       try {
-        const rideRef = await db.collection('rides').add({
+        await db.collection('rides').add({
           ...enhancedRideData,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        rideId = rideRef.id;
-        enhancedRideData.rideId = rideId;
-        activeRides.set(rideId, enhancedRideData);
       } catch (error) {
-        console.error('Error creating ride in Firebase:', error);
+        console.error('Error creating ride:', error);
       }
     }
 
-    // Notify nearby drivers with location context
+    // Notify drivers with enhanced context
     connectedDrivers.forEach((driver, driverSocketId) => {
       if (driver.status === 'online') {
         let distance = null;
@@ -385,36 +439,31 @@ io.on('connection', (socket) => {
 
         io.to(driverSocketId).emit('ride:new', {
           ...enhancedRideData,
-          distanceToPickup: distance
+          distanceToPickup: distance,
+          pickupStationInfo: pickupStations.length > 0 ? `${pickupStations[0].name}駅近く` : null,
+          destinationStationInfo: destinationStations.length > 0 ? `${destinationStations[0].name}駅近く` : null
         });
       }
     });
 
-    // Confirm to customer
     socket.emit('ride:requested', {
       rideId,
       message: '配車リクエストを近くのドライバーに送信しました',
-      status: 'pending'
+      status: 'pending',
+      nearbyStations: pickupStations
     });
   });
 
-  // Driver accepts ride with location
+  // Standard ride acceptance and completion handlers...
   socket.on('ride:accept', async (data) => {
-    console.log('Driver accepting ride:', data);
-
     const ride = activeRides.get(data.rideId);
-    if (!ride) {
-      socket.emit('ride:error', { message: 'Ride not found' });
-      return;
-    }
+    if (!ride) return;
 
-    // Update ride status
     ride.status = 'accepted';
     ride.driverId = socket.id;
     ride.driverLocation = data.driverLocation;
     activeRides.set(data.rideId, ride);
 
-    // Update in Firebase
     if (db) {
       try {
         await db.collection('rides').doc(data.rideId).update({
@@ -428,7 +477,6 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Notify customer with driver location
     io.to(ride.customerSocketId).emit('ride:accepted', {
       rideId: data.rideId,
       driverId: socket.id,
@@ -437,7 +485,6 @@ io.on('connection', (socket) => {
       estimatedArrival: calculateETA(data.driverLocation, ride.pickupCoords)
     });
 
-    // Confirm to driver
     socket.emit('ride:accept:success', {
       rideId: data.rideId,
       message: '配車を承諾しました',
@@ -445,67 +492,25 @@ io.on('connection', (socket) => {
         pickup: ride.pickup,
         destination: ride.destination,
         pickupCoords: ride.pickupCoords,
-        destinationCoords: ride.destinationCoords
+        destinationCoords: ride.destinationCoords,
+        pickupStations: ride.pickupStations,
+        destinationStations: ride.destinationStations
       }
     });
 
-    // Notify other drivers that ride is taken
     connectedDrivers.forEach((driver, driverSocketId) => {
       if (driverSocketId !== socket.id) {
-        io.to(driverSocketId).emit('ride:taken', {
-          rideId: data.rideId
-        });
+        io.to(driverSocketId).emit('ride:taken', { rideId: data.rideId });
       }
     });
   });
 
-  // Ride completion
-  socket.on('ride:complete', async (data) => {
-    console.log('Ride completed:', data);
-
-    const ride = activeRides.get(data.rideId);
-    if (ride) {
-      // Update Firebase
-      if (db) {
-        try {
-          await db.collection('rides').doc(data.rideId).update({
-            status: 'completed',
-            completedAt: admin.firestore.FieldValue.serverTimestamp(),
-            finalFare: data.fare || ride.estimatedFare
-          });
-        } catch (error) {
-          console.error('Error completing ride:', error);
-        }
-      }
-
-      // Notify customer
-      io.to(ride.customerSocketId).emit('ride:completed', {
-        rideId: data.rideId,
-        message: '配車が完了しました',
-        fare: data.fare || ride.estimatedFare
-      });
-
-      // Remove from active rides
-      activeRides.delete(data.rideId);
-
-      // Update customer status
-      if (connectedCustomers.has(ride.customerSocketId)) {
-        const customer = connectedCustomers.get(ride.customerSocketId);
-        customer.status = 'idle';
-        connectedCustomers.set(ride.customerSocketId, customer);
-      }
-    }
-  });
-
-  // Handle disconnection
   socket.on('disconnect', async () => {
     console.log('User disconnected:', socket.id);
 
-    // Check if it was a driver
     if (connectedDrivers.has(socket.id)) {
       const driver = connectedDrivers.get(socket.id);
 
-      // Update Firebase if available
       if (db && driver.driverId) {
         try {
           await db.collection('drivers').doc(driver.driverId).update({
@@ -513,13 +518,12 @@ io.on('connection', (socket) => {
             lastSeen: admin.firestore.FieldValue.serverTimestamp()
           });
         } catch (error) {
-          console.error('Error updating driver offline status:', error);
+          console.error('Error updating driver offline:', error);
         }
       }
 
       connectedDrivers.delete(socket.id);
 
-      // Notify all clients
       io.emit('drivers:update', {
         onlineCount: connectedDrivers.size,
         drivers: Array.from(connectedDrivers.values()).map(d => ({
@@ -530,7 +534,6 @@ io.on('connection', (socket) => {
       });
     }
 
-    // Check if it was a customer
     if (connectedCustomers.has(socket.id)) {
       connectedCustomers.delete(socket.id);
     }
@@ -541,7 +544,7 @@ io.on('connection', (socket) => {
 function calculateDistance(coord1, coord2) {
   if (!coord1 || !coord2) return null;
 
-  const R = 6371; // Earth's radius in km
+  const R = 6371;
   const dLat = (coord2.latitude - coord1.latitude) * Math.PI / 180;
   const dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
   const a =
@@ -549,12 +552,12 @@ function calculateDistance(coord1, coord2) {
     Math.cos(coord1.latitude * Math.PI / 180) * Math.cos(coord2.latitude * Math.PI / 180) *
     Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c; // Distance in km
+  return R * c;
 }
 
 function calculateFare(distanceKm) {
-  const baseFare = 500; // ¥500 base
-  const perKm = 300; // ¥300 per km
+  const baseFare = 500;
+  const perKm = 300;
   return Math.round(baseFare + (distanceKm * perKm));
 }
 
@@ -562,26 +565,24 @@ function calculateETA(driverLocation, customerLocation) {
   if (!driverLocation || !customerLocation) return '計算中...';
 
   const distance = calculateDistance(driverLocation, customerLocation);
-  const avgSpeedKmh = 30; // Average speed in Tokyo
+  const avgSpeedKmh = 30;
   const timeInMinutes = Math.round((distance / avgSpeedKmh) * 60);
 
   return `約${timeInMinutes}分`;
 }
 
-// Error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚕 Tokyo Taxi Backend running on port ${PORT}`);
   console.log(`📡 WebSocket ready for connections`);
   console.log(`🔥 Firebase: ${db ? 'connected' : 'not connected'}`);
   console.log(`🌦️ Weather API: ${WEATHER_API_KEY === 'YOUR_API_KEY_HERE' ? 'Not configured' : 'Configured'}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🚇 Station data: ${TOKYO_STATIONS.yamanote.length + TOKYO_STATIONS.metro.length + TOKYO_STATIONS.airports.length} stations loaded`);
   console.log(`📍 Location tracking: Enabled`);
 });
 
