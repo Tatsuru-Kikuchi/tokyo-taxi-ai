@@ -2,7 +2,7 @@
   "expo": {
     "name": "東京AIタクシー",
     "slug": "tokyo-taxi-ai",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -17,9 +17,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
-      "buildNumber": "25",
+      "buildNumber": "28",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "NSLocationWhenInUseUsageDescription": "このアプリは、お客様とドライバーをマッチングするために位置情報を使用します",
+        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信するために位置情報を使用します"
       }
     },
     "android": {
@@ -28,7 +29,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
-      "versionCode": 25
+      "versionCode": 28
     },
     "web": {
       "favicon": "./assets/favicon.png"
