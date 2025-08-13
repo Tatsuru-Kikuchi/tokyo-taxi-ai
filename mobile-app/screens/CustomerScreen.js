@@ -1,984 +1,772 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  StyleSheet,
-  Text,
   View,
-  TouchableOpacity,
-  TextInput,
+  Text,
+  StyleSheet,
   Alert,
+  TouchableOpacity,
   ScrollView,
   SafeAreaView,
+  Platform,
   ActivityIndicator,
-  Linking,
-  FlatList
+  Linking
 } from 'react-native';
-import MapView, { Marker, Circle } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
-import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// CHANGE THIS TO YOUR PRODUCTION URL
-const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
-const LINE_OA_ID = '@dhai52765howdah';
+const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
+  // Configuration
+  const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+  const LINE_OA_ID = '@dhai52765howdah';
+  const API_BASE_URL = BACKEND_URL;
 
-export default function CustomerScreen({ onSwitchMode }) {
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  // Fix: Provide default props to prevent undefined crash
+  const switchMode = onSwitchMode || (() => {
+    console.warn('onSwitchMode prop not provided');
+  });
+  const backToSelection = onBackToSelection || (() => {
+    console.warn('onBackToSelection prop not provided');
+  });
+
   const [location, setLocation] = useState(null);
-  const [currentRegion, setCurrentRegion] = useState(null);
-  const [prefecture, setPrefecture] = useState(null);
-  const [pickup, setPickup] = useState('');
-  const [destination, setDestination] = useState('');
-  const [pickupCoords, setPickupCoords] = useState(null);
-  const [destinationCoords, setDestinationCoords] = useState(null);
-  const [rideStatus, setRideStatus] = useState('idle');
-  const [onlineDrivers, setOnlineDrivers] = useState(0);
+  const [region, setRegion] = useState('tokyo');
+  const [prefecture, setPrefecture] = useState('東京都');
   const [nearbyStations, setNearbyStations] = useState([]);
-  const [nearbyDrivers, setNearbyDrivers] = useState([]);
-  const [driverLocation, setDriverLocation] = useState(null);
-  const [weatherInfo, setWeatherInfo] = useState(null);
-  const [showMap, setShowMap] = useState(true);
-  const [estimatedFare, setEstimatedFare] = useState(0);
-  const [eta, setEta] = useState(null);
+  const [weather, setWeather] = useState(null);
+  const [recommendations, setRecommendations] = useState([]);
+  const [availableDrivers, setAvailableDrivers] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Socket handling
+  const socketRef = useRef(null);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   useEffect(() => {
-    requestLocationPermission();
+    initializeApp();
     return () => {
-      if (socket) socket.close();
+      cleanup();
     };
   }, []);
 
-  useEffect(() => {
-    if (location) {
-      detectUserRegion();
-      connectToBackend();
-      fetchRegionalWeatherInfo();
+  const cleanup = () => {
+    if (socketRef.current) {
+      try {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setSocketConnected(false);
+      } catch (error) {
+        console.warn('Socket cleanup error:', error);
+      }
     }
-  }, [location]);
+  };
 
-  const requestLocationPermission = async () => {
+  const initializeApp = async () => {
     try {
+      setLoading(true);
+      setError(null);
+
+      // Step 1: Request location permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const currentLocation = await Location.getCurrentPositionAsync({});
-        const coords = {
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude
-        };
-        setLocation(coords);
-        setPickupCoords(coords);
-      } else {
-        Alert.alert('位置情報エラー', '位置情報の使用を許可してください');
+      if (status !== 'granted') {
+        throw new Error('位置情報の許可が必要です');
       }
-    } catch (error) {
-      console.error('Location permission error:', error);
-    }
-  };
 
-  const detectUserRegion = async () => {
-    try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/stations/nearby-regional?lat=${location.latitude}&lon=${location.longitude}&radius=2`
-      );
-      const data = await response.json();
-      setCurrentRegion(data.detectedRegion);
-      setPrefecture(data.prefecture);
-      setNearbyStations(data.stations || []);
+      // Step 2: Get current location
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        timeout: 10000,
+      });
+
+      if (!currentLocation?.coords) {
+        throw new Error('位置情報を取得できません');
+      }
+
+      setLocation(currentLocation.coords);
+
+      // Step 3: Detect region
+      await detectRegion(currentLocation.coords.latitude, currentLocation.coords.longitude);
+
     } catch (error) {
-      console.error('Failed to detect region:', error);
-      // Fallback to Tokyo if detection fails
-      setCurrentRegion('tokyo');
+      console.error('App initialization error:', error);
+      setError(error.message);
+
+      // Fallback to default location (Tokyo)
+      setLocation({ latitude: 35.6762, longitude: 139.6503 });
+      setRegion('tokyo');
       setPrefecture('東京都');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchRegionalWeatherInfo = async () => {
+  const detectRegion = async (lat, lon) => {
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/weather/forecast-regional?lat=${location.latitude}&lon=${location.longitude}`
-      );
-      const data = await response.json();
-      setWeatherInfo(data);
-    } catch (error) {
-      console.error('Failed to fetch regional weather:', error);
-    }
-  };
-
-  const connectToBackend = () => {
-    try {
-      const newSocket = io(BACKEND_URL);
-
-      newSocket.on('connect', () => {
-        console.log('Connected to backend');
-        setConnected(true);
-        newSocket.emit('customer:connect', {
-          customerId: 'customer_' + Math.random().toString(36).substr(2, 9),
-          location: location
-        });
-      });
-
-      newSocket.on('error', (error) => {
-        console.error('Socket error:', error);
-        setConnected(false);
-      });
-
-      newSocket.on('drivers:update', (data) => {
-        // Regional driver count
-        const regionalCount = data.driversByRegion?.[currentRegion] || 0;
-        setOnlineDrivers(regionalCount);
-      });
-
-      newSocket.on('drivers:nearby', (drivers) => {
-        setNearbyDrivers(drivers || []);
-      });
-
-      newSocket.on('stations:nearby', (data) => {
-        setNearbyStations(data.stations || []);
-      });
-
-      newSocket.on('customer:connected', (data) => {
-        setCurrentRegion(data.region);
-        setPrefecture(data.prefecture);
-        setOnlineDrivers(data.onlineDrivers || 0);
-      });
-
-      newSocket.on('ride:accepted', (data) => {
-        setRideStatus('accepted');
-        setDriverLocation(data.driverLocation);
-        setEta(data.estimatedArrival);
-        Alert.alert(
-          '🚕 ドライバーが見つかりました！',
-          `${prefecture}のドライバーが向かっています。\n到着予定: ${data.estimatedArrival}`
-        );
-      });
-
-      newSocket.on('driver:location', (data) => {
-        setDriverLocation(data.location);
-        setEta(data.eta);
-      });
-
-      newSocket.on('ride:requested', (data) => {
-        if (data.region) {
-          setCurrentRegion(data.region);
+        `${API_BASE_URL}/api/stations/nearby-regional?lat=${lat}&lon=${lon}&radius=2`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000,
         }
-      });
+      );
 
-      setSocket(newSocket);
-    } catch (error) {
-      console.error('Connection error:', error);
-      setConnected(false);
-    }
-  };
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
 
-  const selectLocationOnMap = (coordinate, isPickup = true) => {
-    if (isPickup) {
-      setPickupCoords(coordinate);
-      reverseGeocode(coordinate, setPickup);
-    } else {
-      setDestinationCoords(coordinate);
-      reverseGeocode(coordinate, setDestination);
-    }
-    calculateFare();
-  };
+      const data = await response.json();
 
-  const reverseGeocode = async (coords, setter) => {
-    try {
-      const result = await Location.reverseGeocodeAsync(coords);
-      if (result.length > 0) {
-        const address = result[0];
-        const addressString = `${address.name || ''} ${address.street || ''} ${address.district || ''}`
-          .trim().replace(/\s+/g, ' ');
-        setter(addressString || '選択した場所');
+      if (data.detectedRegion && data.prefecture) {
+        setRegion(data.detectedRegion);
+        setPrefecture(data.prefecture);
+        setNearbyStations(data.stations || []);
+
+        // Save to AsyncStorage with error handling
+        await saveToStorage('userRegion', data.detectedRegion);
+        await saveToStorage('userPrefecture', data.prefecture);
+
+        // Load additional data for detected region
+        await Promise.all([
+          loadWeatherData(data.detectedRegion),
+          loadRecommendations(lat, lon),
+          loadAvailableDrivers(data.detectedRegion),
+          initializeSocket()
+        ]);
       }
     } catch (error) {
-      setter('選択した場所');
+      console.error('Region detection error:', error);
+      await loadSavedRegion();
     }
   };
 
-  const calculateFare = () => {
-    if (pickupCoords && destinationCoords) {
-      const distance = calculateDistance(pickupCoords, destinationCoords);
-      const baseFare = 500;
-      const perKm = 300;
-      const fare = Math.round(baseFare + (distance * perKm));
-      setEstimatedFare(fare);
+  // Safe AsyncStorage operations
+  const saveToStorage = async (key, value) => {
+    try {
+      await AsyncStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      console.warn(`AsyncStorage save error for ${key}:`, error);
     }
   };
 
-  const calculateDistance = (coord1, coord2) => {
-    const R = 6371;
-    const dLat = (coord2.latitude - coord1.latitude) * Math.PI / 180;
-    const dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
-    const a =
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(coord1.latitude * Math.PI / 180) * Math.cos(coord2.latitude * Math.PI / 180) *
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  };
-
-  const selectStation = (station, isPickup = true) => {
-    if (isPickup) {
-      setPickup(station.name + '駅');
-      setPickupCoords(station.coords);
-    } else {
-      setDestination(station.name + '駅');
-      setDestinationCoords(station.coords);
+  const loadFromStorage = async (key, defaultValue = null) => {
+    try {
+      const stored = await AsyncStorage.getItem(key);
+      return stored ? JSON.parse(stored) : defaultValue;
+    } catch (error) {
+      console.warn(`AsyncStorage load error for ${key}:`, error);
+      return defaultValue;
     }
-    calculateFare();
   };
 
-  const requestRide = () => {
-    if (!pickupCoords || !destinationCoords) {
-      Alert.alert('エラー', '乗車場所と目的地を選択してください');
+  const loadSavedRegion = async () => {
+    try {
+      const savedRegion = await loadFromStorage('userRegion', 'tokyo');
+      const savedPrefecture = await loadFromStorage('userPrefecture', '東京都');
+
+      setRegion(savedRegion);
+      setPrefecture(savedPrefecture);
+    } catch (error) {
+      console.warn('Load saved region error:', error);
+    }
+  };
+
+  const loadWeatherData = async (regionName) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/weather/forecast-regional?region=${regionName}`,
+        { timeout: 5000 }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setWeather(data.weather);
+      }
+    } catch (error) {
+      console.warn('Weather data error:', error);
+    }
+  };
+
+  const loadRecommendations = async (lat, lon) => {
+    if (!lat || !lon) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/recommendations/regional?lat=${lat}&lon=${lon}`,
+        { timeout: 5000 }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setRecommendations(data.recommendations || []);
+      }
+    } catch (error) {
+      console.warn('Recommendations error:', error);
+    }
+  };
+
+  const loadAvailableDrivers = async (regionName) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/drivers/online?region=${regionName}`,
+        { timeout: 5000 }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableDrivers(data.total || 0);
+      }
+    } catch (error) {
+      console.warn('Available drivers error:', error);
+    }
+  };
+
+  // Safer socket initialization
+  const initializeSocket = async () => {
+    try {
+      const io = require('socket.io-client');
+
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+
+      socketRef.current = io(API_BASE_URL, {
+        transports: ['websocket', 'polling'],
+        timeout: 5000,
+        forceNew: true,
+      });
+
+      socketRef.current.on('connect', () => {
+        console.log('Socket connected');
+        setSocketConnected(true);
+      });
+
+      socketRef.current.on('disconnect', () => {
+        console.log('Socket disconnected');
+        setSocketConnected(false);
+      });
+
+      socketRef.current.on('connect_error', (error) => {
+        console.warn('Socket connection error:', error);
+        setSocketConnected(false);
+      });
+
+      // Set connection timeout
+      setTimeout(() => {
+        if (!socketConnected) {
+          console.warn('Socket connection timeout');
+          if (socketRef.current) {
+            socketRef.current.disconnect();
+          }
+        }
+      }, 10000);
+
+    } catch (error) {
+      console.warn('Socket initialization error:', error);
+      setSocketConnected(false);
+    }
+  };
+
+  const requestRide = async () => {
+    if (!location) {
+      Alert.alert('エラー', '位置情報を取得できません');
       return;
     }
 
-    if (!socket || !connected) {
-      Alert.alert('接続エラー', 'サーバーに接続できません。もう一度お試しください。');
-      return;
-    }
+    try {
+      const rideData = {
+        customerId: `customer_${Date.now()}`,
+        customerName: 'お客様',
+        pickup: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          address: `${prefecture}内`
+        },
+        destination: nearbyStations[0] ? {
+          latitude: nearbyStations[0].lat,
+          longitude: nearbyStations[0].lon,
+          address: nearbyStations[0].name
+        } : null
+      };
 
-    if (!currentRegion) {
-      Alert.alert('エラー', 'エリアを検出できていません。位置情報を確認してください。');
-      return;
-    }
+      const response = await fetch(`${API_BASE_URL}/api/rides/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rideData),
+        timeout: 10000,
+      });
 
-    setRideStatus('requesting');
-    socket.emit('ride:request', {
-      pickup,
-      destination,
-      pickupCoords,
-      destinationCoords,
-      region: currentRegion,
-      prefecture: prefecture,
-      timestamp: new Date().toISOString()
-    });
+      if (response.ok) {
+        const result = await response.json();
+        Alert.alert(
+          '配車リクエスト送信完了',
+          `${result.availableDrivers}名のドライバーに通知しました`
+        );
+      } else {
+        throw new Error('配車リクエストに失敗しました');
+      }
+    } catch (error) {
+      console.error('Ride request error:', error);
+      Alert.alert('エラー', '配車リクエストに失敗しました');
+    }
   };
 
-  const openLINE = () => {
-    const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
-    Linking.openURL(lineURL).catch(() => {
-      Alert.alert('エラー', 'LINEアプリがインストールされていません');
-    });
-  };
+  // LINE Integration Functions
+  const openLINESupport = async () => {
+    try {
+      const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+      const canOpen = await Linking.canOpenURL(lineURL);
 
-  const handleSwitch = () => {
-    if (onSwitchMode) {
-      onSwitchMode();
+      if (canOpen) {
+        await Linking.openURL(lineURL);
+      } else {
+        // Fallback: open LINE web version
+        const webURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+        await Linking.openURL(webURL);
+      }
+    } catch (error) {
+      console.error('LINE open error:', error);
+      Alert.alert(
+        'エラー',
+        'LINEアプリを開けませんでした。\nLINE ID: ' + LINE_OA_ID + '\nで検索してください。',
+        [
+          { text: 'OK', style: 'default' },
+          {
+            text: 'LINE IDをコピー',
+            onPress: () => {
+              // In a real app, you might use Clipboard API here
+              Alert.alert('LINE ID', LINE_OA_ID);
+            }
+          }
+        ]
+      );
     }
   };
 
-  const renderStationItem = ({ item, index }) => (
-    <View style={styles.stationItem}>
-      <TouchableOpacity
-        style={styles.stationButton}
-        onPress={() => selectStation(item, true)}
-      >
-        <Text style={styles.stationName}>{item.name}駅</Text>
-        <Text style={styles.stationLines}>
-          {item.lines.slice(0, 2).join(', ')}
-          {item.lines.length > 2 && ` 他${item.lines.length - 2}線`}
-        </Text>
-        <Text style={styles.stationDistance}>
-          {location ? `${calculateDistance(location, item.coords).toFixed(1)}km` : ''}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.destinationButton}
-        onPress={() => selectStation(item, false)}
-      >
-        <Text style={styles.destinationButtonText}>目的地</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  const showSupportOptions = () => {
+    Alert.alert(
+      'サポート・お問い合わせ',
+      'どちらの方法でサポートを受けますか？',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: 'LINEサポート', onPress: openLINESupport },
+        {
+          text: 'メールサポート',
+          onPress: () => Linking.openURL('mailto:support@zenkoku-ai-taxi.jp?subject=お問い合わせ')
+        }
+      ]
+    );
+  };
 
-  if (!location) {
+  const handleRetry = () => {
+    setError(null);
+    initializeApp();
+  };
+
+  if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>位置情報を取得中...</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={styles.loadingText}>アプリを初期化中...</Text>
+          <Text style={styles.loadingSubtext}>位置情報と地域データを取得しています</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
-  if (!currentRegion) {
+  if (error) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>エリアを検出中...</Text>
-        <Text style={styles.regionText}>全国対応の準備をしています</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>エラーが発生しました</Text>
+          <Text style={styles.errorMessage}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.switchButton} onPress={switchMode}>
+            <Text style={styles.switchButtonText}>ドライバーモードに切り替え</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.supportButton} onPress={showSupportOptions}>
+            <Text style={styles.supportButtonText}>サポートに連絡</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
-        {/* Header with Regional Info */}
+      <ScrollView style={styles.scrollView}>
+        {/* Header */}
         <View style={styles.header}>
-          <View style={styles.titleContainer}>
-            <Text style={styles.title}>🚕 お客様</Text>
-            <Text style={styles.regionBadge}>{prefecture}</Text>
-          </View>
-          <TouchableOpacity onPress={handleSwitch} style={styles.switchButton}>
-            <Text style={styles.switchText}>ドライバーモードへ</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Connection Status */}
-        <View style={styles.statusBar}>
-          <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
-          <Text style={styles.statusText}>
-            {connected
-              ? `${prefecture}で${onlineDrivers}名のドライバーが待機中`
-              : '接続中...'}
-          </Text>
-        </View>
-
-        {/* Regional Weather Info */}
-        {weatherInfo && (
-          <View style={styles.weatherCard}>
-            <Text style={styles.weatherTitle}>🌦️ {weatherInfo.location}の天気情報</Text>
-            <Text style={styles.weatherText}>
-              現在: {weatherInfo.current.temp}°C {weatherInfo.current.description}
+          <Text style={styles.title}>お客様</Text>
+          <Text style={styles.prefecture}>{prefecture}</Text>
+          <View style={styles.connectionStatus}>
+            <View style={[
+              styles.connectionDot,
+              { backgroundColor: socketConnected ? '#4CAF50' : '#ff6b6b' }
+            ]} />
+            <Text style={styles.connectionText}>
+              {socketConnected ? '接続済み' : 'オフライン'}
             </Text>
-            {weatherInfo.rainAlert && (
-              <Text style={styles.rainAlert}>
-                ⚠️ {weatherInfo.location}で雨予報 - 駅周辺の需要が高まる可能性があります
-              </Text>
-            )}
           </View>
-        )}
-
-        {/* Coverage Info */}
-        <View style={styles.coverageCard}>
-          <Text style={styles.coverageTitle}>🗾 全国AIタクシー</Text>
-          <Text style={styles.coverageText}>
-            現在地: {prefecture} | 全国47都道府県対応
-          </Text>
-          <Text style={styles.coverageSubtext}>
-            地域の駅情報と天気を連動したAI配車
-          </Text>
         </View>
 
-        {/* Map Toggle */}
-        <View style={styles.mapToggle}>
-          <TouchableOpacity
-            style={[styles.toggleButton, showMap && styles.activeToggle]}
-            onPress={() => setShowMap(true)}
-          >
-            <Text style={[styles.toggleText, showMap && styles.activeToggleText]}>地図</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleButton, !showMap && styles.activeToggle]}
-            onPress={() => setShowMap(false)}
-          >
-            <Text style={[styles.toggleText, !showMap && styles.activeToggleText]}>駅選択</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Map View */}
-        {showMap ? (
+        {/* Map */}
+        {location && (
           <View style={styles.mapContainer}>
             <MapView
               style={styles.map}
-              initialRegion={{
+              provider={PROVIDER_GOOGLE}
+              region={{
                 latitude: location.latitude,
                 longitude: location.longitude,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
               }}
               showsUserLocation={true}
-              onPress={(e) => selectLocationOnMap(e.nativeEvent.coordinate, true)}
+              showsMyLocationButton={true}
             >
-              {/* Current Location */}
-              <Marker coordinate={location} title="現在地" pinColor="blue" />
+              {/* Current location marker */}
+              <Marker
+                coordinate={{
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                }}
+                title="現在地"
+                pinColor="blue"
+              />
 
-              {/* Pickup Location */}
-              {pickupCoords && (
-                <Marker coordinate={pickupCoords} title="乗車場所" pinColor="green" />
-              )}
-
-              {/* Destination */}
-              {destinationCoords && (
-                <Marker coordinate={destinationCoords} title="目的地" pinColor="red" />
-              )}
-
-              {/* Regional Stations */}
+              {/* Station markers */}
               {nearbyStations.map((station, index) => (
                 <Marker
-                  key={index}
-                  coordinate={station.coords}
-                  title={station.name + '駅'}
-                  description={`${prefecture} | ${station.lines.join(', ')}`}
-                  pinColor="orange"
+                  key={station.id || index}
+                  coordinate={{
+                    latitude: station.lat,
+                    longitude: station.lon,
+                  }}
+                  title={station.name}
+                  description={station.description || ''}
+                  pinColor="red"
                 />
               ))}
-
-              {/* Nearby Drivers */}
-              {nearbyDrivers.map((driver, index) => (
-                <Marker
-                  key={`driver-${index}`}
-                  coordinate={driver.location}
-                  title="ドライバー"
-                  pinColor="blue"
-                >
-                  <View style={styles.driverMarker}>
-                    <Text style={styles.driverMarkerText}>🚗</Text>
-                  </View>
-                </Marker>
-              ))}
-
-              {/* Driver Location (when ride accepted) */}
-              {driverLocation && (
-                <Marker
-                  coordinate={driverLocation}
-                  title="あなたのドライバー"
-                  pinColor="purple"
-                >
-                  <View style={styles.activeTaxiMarker}>
-                    <Text style={styles.activeTaxiText}>🚕</Text>
-                  </View>
-                </Marker>
-              )}
-
-              {/* Weather-sensitive areas */}
-              {weatherInfo && weatherInfo.rainAlert && nearbyStations
-                .filter(s => s.weatherSensitive)
-                .map((station, index) => (
-                  <Circle
-                    key={`weather-${index}`}
-                    center={station.coords}
-                    radius={500}
-                    fillColor="rgba(255, 0, 0, 0.1)"
-                    strokeColor="rgba(255, 0, 0, 0.3)"
-                  />
-                ))
-              }
             </MapView>
-
-            <View style={styles.mapInstructions}>
-              <Text style={styles.instructionText}>地図をタップして乗車場所を選択</Text>
-              <TouchableOpacity
-                style={styles.currentLocationButton}
-                onPress={() => {
-                  setPickupCoords(location);
-                  reverseGeocode(location, setPickup);
-                }}
-              >
-                <Text style={styles.currentLocationText}>現在地を乗車場所にする</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          /* Station Selection */
-          <View style={styles.stationContainer}>
-            <Text style={styles.sectionTitle}>{prefecture}の駅から選択</Text>
-            {nearbyStations.length > 0 ? (
-              <FlatList
-                data={nearbyStations}
-                renderItem={renderStationItem}
-                keyExtractor={(item) => item.id}
-                style={styles.stationList}
-              />
-            ) : (
-              <Text style={styles.noStationsText}>
-                近くの駅データを読み込み中...
-              </Text>
-            )}
           </View>
         )}
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={openLINE}>
-            <Text style={styles.actionText}>💬 LINE予約</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Booking Form */}
-        <View style={styles.bookingForm}>
-          <Text style={styles.sectionTitle}>配車予約</Text>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>乗車場所</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="📍 乗車場所を入力または地図で選択"
-              value={pickup}
-              onChangeText={setPickup}
-              editable={rideStatus === 'idle'}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>目的地</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="🎯 目的地を入力または地図で選択"
-              value={destination}
-              onChangeText={setDestination}
-              editable={rideStatus === 'idle'}
-            />
-          </View>
-
-          {/* Fare Estimate */}
-          {estimatedFare > 0 && (
-            <View style={styles.fareContainer}>
-              <Text style={styles.fareLabel}>予想料金</Text>
-              <Text style={styles.fareAmount}>¥{estimatedFare.toLocaleString()}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={[styles.bookButton, (!connected || rideStatus !== 'idle' || !pickupCoords || !destinationCoords) && styles.bookButtonDisabled]}
-            onPress={requestRide}
-            disabled={!connected || rideStatus !== 'idle' || !pickupCoords || !destinationCoords}
-          >
-            <Text style={styles.bookButtonText}>
-              {rideStatus === 'idle' ? `${prefecture}で配車をリクエスト` : '処理中...'}
+        {/* Weather Info */}
+        {weather && (
+          <View style={styles.weatherContainer}>
+            <Text style={styles.weatherTitle}>天気情報</Text>
+            <Text style={styles.weatherInfo}>
+              {weather.current?.description || '情報取得中'} |
+              気温: {weather.current?.temperature || '--'}°C
             </Text>
-          </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Available Drivers */}
+        <View style={styles.driversContainer}>
+          <Text style={styles.driversText}>
+            {region}で{availableDrivers}名のドライバーが待機中
+          </Text>
         </View>
 
-        {/* Status Display */}
-        {rideStatus === 'requesting' && (
-          <View style={styles.statusCard}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.statusTitle}>{prefecture}のドライバーを探しています...</Text>
-            <Text style={styles.statusSubtitle}>しばらくお待ちください</Text>
-          </View>
-        )}
-
-        {rideStatus === 'accepted' && (
-          <View style={styles.statusCard}>
-            <Text style={styles.emoji}>🚕</Text>
-            <Text style={styles.statusTitle}>{prefecture}のドライバーが向かっています！</Text>
-            {eta && <Text style={styles.etaText}>到着予定: {eta}</Text>}
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => {
-                setRideStatus('idle');
-                setPickup('');
-                setDestination('');
-                setPickupCoords(null);
-                setDestinationCoords(null);
-                setDriverLocation(null);
-                setEta(null);
-              }}
-            >
-              <Text style={styles.cancelButtonText}>新しい予約</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Regional Stations Info */}
-        {nearbyStations.length > 0 && showMap && (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>🚇 {prefecture}の近くの駅情報</Text>
-            {nearbyStations.slice(0, 3).map((station, index) => (
-              <View key={index} style={styles.stationInfo}>
-                <Text style={styles.stationInfoName}>{station.name}駅</Text>
-                <Text style={styles.stationInfoLines}>
-                  {station.lines.slice(0, 2).join(', ')}
-                  {station.lines.length > 2 && ` 他${station.lines.length - 2}線`}
-                </Text>
-                <Text style={styles.stationInfoDistance}>
-                  {location ? `${calculateDistance(location, station.coords).toFixed(1)}km` : ''}
-                </Text>
+        {/* AI Recommendations */}
+        {recommendations.length > 0 && (
+          <View style={styles.recommendationsContainer}>
+            <Text style={styles.recommendationsTitle}>AI推奨情報</Text>
+            {recommendations.slice(0, 2).map((rec, index) => (
+              <View key={index} style={styles.recommendationItem}>
+                <Text style={styles.recommendationText}>{rec.message}</Text>
               </View>
             ))}
           </View>
         )}
+
+        {/* Action Buttons */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.rideButton} onPress={requestRide}>
+            <Text style={styles.rideButtonText}>配車をリクエスト</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.lineButton} onPress={openLINESupport}>
+            <Text style={styles.lineButtonText}>💬 LINEサポート</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.switchButton} onPress={switchMode}>
+            <Text style={styles.switchButtonText}>ドライバーモードに切り替え</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.backButton} onPress={backToSelection}>
+            <Text style={styles.backButtonText}>モード選択に戻る</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Coverage Info */}
+        <View style={styles.coverageContainer}>
+          <Text style={styles.coverageText}>全国47都道府県対応予定</Text>
+          <Text style={styles.coverageSubtext}>
+            現在対応: 東京・名古屋・大阪・京都・福岡・札幌・仙台・広島
+          </Text>
+          <TouchableOpacity style={styles.supportLinkButton} onPress={showSupportOptions}>
+            <Text style={styles.supportLinkText}>サポート・お問い合わせ</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  scrollView: {
+    flex: 1,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    padding: 20,
   },
   loadingText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 20,
+    color: '#333',
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#666',
     marginTop: 10,
+    textAlign: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ff6b6b',
+    marginBottom: 10,
+  },
+  errorMessage: {
     fontSize: 16,
     color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
   },
-  regionText: {
-    marginTop: 5,
-    fontSize: 14,
-    color: '#4CAF50',
+  retryButton: {
+    backgroundColor: '#667eea',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginBottom: 10,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  supportButton: {
+    backgroundColor: '#00C300',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginTop: 10,
+  },
+  supportButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   header: {
-    backgroundColor: 'white',
+    backgroundColor: '#667eea',
     padding: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  titleContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginRight: 10,
-  },
-  regionBadge: {
-    fontSize: 12,
-    backgroundColor: '#4CAF50',
     color: 'white',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
   },
-  switchButton: {
-    padding: 10,
-    backgroundColor: '#2196F3',
-    borderRadius: 5,
-  },
-  switchText: {
+  prefecture: {
+    fontSize: 16,
     color: 'white',
-    fontSize: 12,
+    opacity: 0.9,
+    marginTop: 5,
   },
-  statusBar: {
+  connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: 'white',
-    marginTop: 1,
+    marginTop: 10,
   },
-  dot: {
+  connectionDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: 10,
+    marginRight: 8,
   },
-  statusText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  weatherCard: {
-    backgroundColor: '#E3F2FD',
-    margin: 20,
-    padding: 15,
-    borderRadius: 10,
-  },
-  weatherTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 5,
-  },
-  weatherText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  rainAlert: {
-    fontSize: 12,
-    color: '#f44336',
-    marginTop: 5,
-  },
-  coverageCard: {
-    backgroundColor: '#F1F8E9',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 15,
-    borderRadius: 10,
-  },
-  coverageTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2E7D32',
-    marginBottom: 5,
-  },
-  coverageText: {
-    fontSize: 14,
-    color: '#388E3C',
-    marginBottom: 3,
-  },
-  coverageSubtext: {
-    fontSize: 12,
-    color: '#66BB6A',
-  },
-  mapToggle: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    marginHorizontal: 20,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  toggleButton: {
-    flex: 1,
-    padding: 10,
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  activeToggle: {
-    backgroundColor: '#4CAF50',
-  },
-  toggleText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  activeToggleText: {
+  connectionText: {
     color: 'white',
-    fontWeight: '600',
+    fontSize: 12,
   },
   mapContainer: {
     height: 300,
-    margin: 20,
-    borderRadius: 10,
+    margin: 15,
+    borderRadius: 15,
     overflow: 'hidden',
   },
   map: {
     flex: 1,
   },
-  mapInstructions: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    right: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  weatherContainer: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  weatherTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    color: '#333',
+  },
+  weatherInfo: {
+    fontSize: 14,
+    color: '#666',
+  },
+  driversContainer: {
+    backgroundColor: '#e8f4f8',
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+  },
+  driversText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  recommendationsContainer: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  recommendationsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333',
+  },
+  recommendationItem: {
+    backgroundColor: '#f0f8ff',
     padding: 10,
-    borderRadius: 5,
-  },
-  instructionText: {
-    fontSize: 12,
-    textAlign: 'center',
-    marginBottom: 5,
-  },
-  currentLocationButton: {
-    backgroundColor: '#4CAF50',
-    padding: 8,
-    borderRadius: 5,
-    alignItems: 'center',
-  },
-  currentLocationText: {
-    color: 'white',
-    fontSize: 12,
-  },
-  driverMarker: {
-    backgroundColor: '#2196F3',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  driverMarkerText: {
-    fontSize: 16,
-  },
-  activeTaxiMarker: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  activeTaxiText: {
-    fontSize: 20,
-  },
-  stationContainer: {
-    margin: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  stationList: {
-    maxHeight: 300,
-  },
-  noStationsText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    padding: 20,
-  },
-  stationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 12,
+    borderRadius: 8,
     marginBottom: 8,
-    borderRadius: 8,
   },
-  stationButton: {
-    flex: 1,
-  },
-  stationName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  stationLines: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  stationDistance: {
-    fontSize: 12,
-    color: '#4CAF50',
-    marginTop: 2,
-  },
-  destinationButton: {
-    backgroundColor: '#f44336',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  destinationButtonText: {
-    color: 'white',
-    fontSize: 12,
-  },
-  quickActions: {
-    padding: 20,
-  },
-  actionButton: {
-    backgroundColor: '#00B900',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  actionText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  bookingForm: {
-    backgroundColor: 'white',
-    margin: 20,
-    padding: 20,
-    borderRadius: 10,
-  },
-  inputContainer: {
-    marginBottom: 15,
-  },
-  inputLabel: {
+  recommendationText: {
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 5,
-    color: '#333',
+    color: '#555',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
-    borderRadius: 5,
-    fontSize: 16,
+  buttonContainer: {
+    margin: 15,
   },
-  fareContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 15,
-  },
-  fareLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  fareAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  bookButton: {
+  rideButton: {
     backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 5,
+    paddingVertical: 15,
+    borderRadius: 25,
     alignItems: 'center',
-    marginTop: 10,
+    marginBottom: 10,
   },
-  bookButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  bookButtonText: {
+  rideButtonText: {
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
   },
-  statusCard: {
-    backgroundColor: 'white',
-    margin: 20,
-    padding: 30,
-    borderRadius: 10,
+  lineButton: {
+    backgroundColor: '#00C300',
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  lineButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  switchButton: {
+    backgroundColor: '#ff6b6b',
+    paddingVertical: 15,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  switchButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  backButton: {
+    backgroundColor: '#ccc',
+    paddingVertical: 12,
+    borderRadius: 25,
     alignItems: 'center',
   },
-  statusTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  statusSubtitle: {
+  backButtonText: {
+    color: '#666',
     fontSize: 14,
+    fontWeight: 'bold',
+  },
+  coverageContainer: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  coverageText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#667eea',
+  },
+  coverageSubtext: {
+    fontSize: 12,
     color: '#666',
     marginTop: 5,
+    textAlign: 'center',
+    marginBottom: 15,
   },
-  emoji: {
-    fontSize: 50,
-    marginBottom: 10,
-  },
-  etaText: {
-    fontSize: 16,
-    color: '#4CAF50',
-    fontWeight: '600',
-    marginTop: 10,
-  },
-  cancelButton: {
-    marginTop: 20,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#4CAF50',
-    borderRadius: 5,
-  },
-  cancelButtonText: {
-    color: '#4CAF50',
-    fontSize: 14,
-  },
-  infoCard: {
-    backgroundColor: 'white',
-    margin: 20,
-    padding: 15,
-    borderRadius: 10,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
-  stationInfo: {
+  supportLinkButton: {
+    backgroundColor: 'transparent',
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    paddingHorizontal: 15,
+    borderColor: '#00C300',
+    borderWidth: 1,
+    borderRadius: 20,
   },
-  stationInfoName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  stationInfoLines: {
+  supportLinkText: {
+    color: '#00C300',
     fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  stationInfoDistance: {
-    fontSize: 12,
-    color: '#4CAF50',
-    marginTop: 2,
+    fontWeight: 'bold',
   },
 });
+
+export default CustomerScreen;

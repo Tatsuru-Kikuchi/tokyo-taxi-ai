@@ -1,0 +1,63 @@
+<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone Frame -->
+  <rect width="375" height="812" rx="40" ry="40" fill="#000"/>
+  <rect x="15" y="15" width="345" height="782" rx="35" ry="35" fill="#f8f9fa"/>
+  
+  <!-- Status Bar -->
+  <rect x="15" y="15" width="345" height="44" fill="#000"/>
+  <text x="30" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">9:41</text>
+  <text x="320" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">100%</text>
+  
+  <!-- Header Bar -->
+  <rect x="15" y="59" width="345" height="60" fill="#4facfe"/>
+  <text x="187.5" y="95" font-family="system-ui" font-size="18" font-weight="bold" text-anchor="middle" fill="white">🧠 AI推奨エリア</text>
+  
+  <!-- Weather Card -->
+  <rect x="30" y="139" width="315" height="100" rx="15" ry="15" fill="url(#blueGradient)"/>
+  <defs>
+    <linearGradient id="blueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <text x="50" y="170" font-family="system-ui" font-size="18" font-weight="bold" fill="white">🌧️ 名古屋の天気</text>
+  <text x="50" y="195" font-family="system-ui" font-size="14" fill="white">雨予報 - 需要増加予想</text>
+  <text x="50" y="215" font-family="system-ui" font-size="12" fill="rgba(255,255,255,0.8)">現在気温: 18°C | 降水確率: 80%</text>
+  
+  <!-- Recommendation Cards -->
+  <rect x="30" y="259" width="315" height="70" rx="12" ry="12" fill="white" stroke="#ddd" stroke-width="1"/>
+  <text x="50" y="280" font-family="system-ui" font-size="14" font-weight="bold" fill="#333">🚇 名古屋駅エリア</text>
+  <text x="50" y="300" font-family="system-ui" font-size="12" fill="#666">雨のため需要が30%増加中</text>
+  <rect x="280" y="270" width="50" height="25" rx="12" ry="12" fill="#ff6b6b"/>
+  <text x="305" y="285" font-family="system-ui" font-size="10" font-weight="bold" text-anchor="middle" fill="white">高需要</text>
+  
+  <rect x="30" y="349" width="315" height="70" rx="12" ry="12" fill="white" stroke="#ddd" stroke-width="1"/>
+  <text x="50" y="370" font-family="system-ui" font-size="14" font-weight="bold" fill="#333">🌃 栄駅周辺</text>
+  <text x="50" y="390" font-family="system-ui" font-size="12" fill="#666">18:00の帰宅ラッシュに備えて移動推奨</text>
+  <rect x="280" y="360" width="50" height="25" rx="12" ry="12" fill="#ffa726"/>
+  <text x="305" y="375" font-family="system-ui" font-size="10" font-weight="bold" text-anchor="middle" fill="white">中需要</text>
+  
+  <rect x="30" y="439" width="315" height="70" rx="12" ry="12" fill="white" stroke="#ddd" stroke-width="1"/>
+  <text x="50" y="460" font-family="system-ui" font-size="14" font-weight="bold" fill="#333">💰 収益予想</text>
+  <text x="50" y="480" font-family="system-ui" font-size="12" fill="#666">現在のエリアで +¥1,500/時間</text>
+  <rect x="280" y="450" width="50" height="25" rx="12" ry="12" fill="#4CAF50"/>
+  <text x="305" y="465" font-family="system-ui" font-size="10" font-weight="bold" text-anchor="middle" fill="white">推奨</text>
+  
+  <!-- AI Insights Section -->
+  <rect x="30" y="529" width="315" height="120" rx="15" ry="15" fill="#f0f8ff" stroke="#4facfe" stroke-width="2"/>
+  <text x="50" y="555" font-family="system-ui" font-size="16" font-weight="bold" fill="#333">🤖 AIインサイト</text>
+  <text x="50" y="580" font-family="system-ui" font-size="12" fill="#666">• 過去のデータから雨の日は通常の1.4倍の需要</text>
+  <text x="50" y="600" font-family="system-ui" font-size="12" fill="#666">• 名古屋駅～栄駅間のルートが最も効率的</text>
+  <text x="50" y="620" font-family="system-ui" font-size="12" fill="#666">• 19:00頃まで高需要が続く予想</text>
+  
+  <!-- Action Buttons -->
+  <rect x="30" y="669" width="150" height="45" rx="12" ry="12" fill="#4facfe"/>
+  <text x="105" y="697" font-family="system-ui" font-size="14" font-weight="bold" text-anchor="middle" fill="white">推奨エリアへ移動</text>
+  
+  <rect x="195" y="669" width="150" height="45" rx="12" ry="12" fill="#f0f0f0"/>
+  <text x="270" y="697" font-family="system-ui" font-size="14" text-anchor="middle" fill="#666">設定変更</text>
+  
+  <!-- Bottom Stats -->
+  <rect x="30" y="734" width="315" height="40" fill="rgba(79, 172, 254, 0.1)" rx="8" ry="8"/>
+  <text x="187.5" y="755" font-family="system-ui" font-size="12" font-weight="bold" text-anchor="middle" fill="#4facfe">今日の収益向上: +¥3,200 (AI推奨エリア効果)</text>
+</svg>
