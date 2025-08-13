@@ -1,560 +1,716 @@
-// Enhanced server.js for Nationwide Japan Support
-require('dotenv').config();
-
 const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
 const cors = require('cors');
+const { WebSocketServer } = require('ws');
+const http = require('http');
 const admin = require('firebase-admin');
-const axios = require('axios');
 
-// Import Japan-wide station data
+// Initialize Firebase Admin SDK
+let firestore;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: serviceAccount.project_id
+    });
+    console.log('✅ Firebase initialized with environment variable');
+  } else {
+    console.log('⚠️ Firebase service account not found in environment');
+  }
+  firestore = admin.firestore();
+  console.log('✅ Firestore connected');
+} catch (error) {
+  console.error('❌ Firebase initialization error:', error.message);
+}
+
+// Import station data - FIXED IMPORT
 const {
-  JAPAN_STATIONS,
-  PREFECTURE_REGIONS,
-  WEATHER_LOCATIONS,
-  detectRegion,
-  getStationsForRegion,
-  getWeatherLocationForRegion,
-  getNationwideAIRecommendations,
+  ALL_JAPAN_STATIONS,
+  REGIONS,
+  getStationsByRegion,
+  getRegionByCoordinates,
   getNearbyStations
 } = require('./japan-stations');
 
-// Initialize Firebase Admin
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('✅ Firebase initialized with environment variable');
-  } catch (error) {
-    console.error('Failed to parse Firebase service account:', error);
-  }
-} else {
-  try {
-    const serviceAccount = require('./serviceAccountKey.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('✅ Firebase initialized with local file');
-  } catch (error) {
-    console.log('⚠️ serviceAccountKey.json not found - running without Firebase');
-  }
-}
-
-let db = null;
-if (admin.apps.length > 0) {
-  db = admin.firestore();
-  console.log('✅ Firestore connected');
-}
-
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
 
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 app.use(express.json());
 
-const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
+// Create HTTP server and WebSocket server
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
 
-// REST API Routes
-app.get('/', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: '全国AIタクシー Backend API',
-    version: '3.0.0',
-    coverage: 'Nationwide Japan',
-    regions: Object.keys(JAPAN_STATIONS),
-    endpoints: ['/api/health', '/api/weather/forecast', '/api/stations', '/api/recommendations']
+// In-memory storage (for development)
+let users = [];
+let drivers = [];
+let rides = [];
+let rideRequests = [];
+
+// WebSocket connection handling
+wss.on('connection', (ws) => {
+  console.log('📱 Client connected');
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      console.log('📨 Received:', data);
+
+      switch (data.type) {
+        case 'driver_online':
+          const driver = {
+            id: data.driverId,
+            name: data.driverName,
+            location: data.location,
+            isOnline: true,
+            ws: ws
+          };
+          drivers = drivers.filter(d => d.id !== data.driverId);
+          drivers.push(driver);
+          console.log(`🚕 Driver ${data.driverName} is online`);
+          break;
+
+        case 'driver_offline':
+          drivers = drivers.filter(d => d.id !== data.driverId);
+          console.log(`🚕 Driver ${data.driverId} went offline`);
+          break;
+
+        case 'location_update':
+          const driverIndex = drivers.findIndex(d => d.id === data.driverId);
+          if (driverIndex !== -1) {
+            drivers[driverIndex].location = data.location;
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('❌ WebSocket message error:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('📱 Client disconnected');
+    drivers = drivers.filter(d => d.ws !== ws);
   });
 });
 
-app.get('/api/health', (req, res) => {
-  const totalStations = Object.values(JAPAN_STATIONS)
-    .reduce((total, region) => {
-      return total + Object.values(region).flat().length;
-    }, 0);
+// OpenWeather API Configuration
+const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
+const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
 
-  res.json({
-    status: 'OK',
-    message: '全国AIタクシー Backend Running',
-    firebase: admin.apps.length > 0 ? 'connected' : 'not connected',
-    timestamp: new Date().toISOString(),
-    connectedDrivers: connectedDrivers.size,
-    connectedCustomers: connectedCustomers.size,
-    totalStations: totalStations,
-    supportedRegions: Object.keys(JAPAN_STATIONS).length
-  });
-});
+// Region coordinates for weather lookup
+const REGION_COORDINATES = {
+  tokyo: { lat: 35.6762, lon: 139.6503 },
+  osaka: { lat: 34.6937, lon: 135.5023 },
+  nagoya: { lat: 35.1815, lon: 136.9066 },
+  kyoto: { lat: 35.0116, lon: 135.7681 },
+  fukuoka: { lat: 33.5904, lon: 130.4017 },
+  sapporo: { lat: 43.0642, lon: 141.3469 },
+  sendai: { lat: 38.2682, lon: 140.8694 },
+  hiroshima: { lat: 34.3853, lon: 132.4553 }
+};
 
-// Regional weather forecast
-app.get('/api/weather/forecast-regional', async (req, res) => {
-  const { lat, lon, region } = req.query;
-
-  let weatherLocation;
-  if (lat && lon) {
-    const userLocation = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
-    const detectedRegion = detectRegion(userLocation);
-    weatherLocation = getWeatherLocationForRegion(detectedRegion);
-  } else if (region) {
-    weatherLocation = getWeatherLocationForRegion(region);
-  } else {
-    weatherLocation = WEATHER_LOCATIONS.tokyo; // Default
-  }
-
+// Helper Functions
+const getWeatherForecast = async (region = 'tokyo') => {
   try {
-    if (WEATHER_API_KEY === 'YOUR_API_KEY_HERE') {
-      return res.status(400).json({
-        error: 'Weather API key not configured',
-        message: 'Please add your OpenWeatherMap API key'
-      });
+    // Get coordinates for the region
+    const coords = REGION_COORDINATES[region] || REGION_COORDINATES.tokyo;
+
+    if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'your_api_key_here') {
+      console.log('⚠️ Using mock weather data - OpenWeather API key not configured');
+      return getMockWeatherData();
     }
 
-    const response = await axios.get(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${weatherLocation.lat}&lon=${weatherLocation.lon}&appid=${WEATHER_API_KEY}&units=metric`
+    // Current weather
+    const currentResponse = await fetch(
+      `${OPENWEATHER_BASE_URL}/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
     );
 
-    const forecasts = response.data.list.slice(0, 8).map(item => ({
-      time: new Date(item.dt * 1000).toLocaleTimeString('ja-JP'),
-      temp: Math.round(item.main.temp),
-      description: item.weather[0].description,
-      rain: item.rain ? item.rain['3h'] || 0 : 0,
-      humidity: item.main.humidity,
-      windSpeed: item.wind.speed
-    }));
+    // Forecast weather
+    const forecastResponse = await fetch(
+      `${OPENWEATHER_BASE_URL}/forecast?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
+    );
 
-    const rainComing = forecasts.slice(0, 1).some(f => f.rain > 0);
+    if (!currentResponse.ok || !forecastResponse.ok) {
+      console.log('⚠️ Weather API error, using mock data');
+      return getMockWeatherData();
+    }
 
-    // Get regional stations for recommendations
-    const userRegion = detectRegion({ latitude: weatherLocation.lat, longitude: weatherLocation.lon });
-    const regionalStations = getStationsForRegion(userRegion);
-    const allStations = Object.values(regionalStations).flat();
+    const currentData = await currentResponse.json();
+    const forecastData = await forecastResponse.json();
 
-    const recommendedStations = rainComing
-      ? allStations.filter(s => s.weatherSensitive).slice(0, 5)
-      : allStations.filter(s => s.demandLevel === 'very_high').slice(0, 5);
+    // Convert OpenWeather condition to our format
+    const convertCondition = (weather) => {
+      const main = weather.main.toLowerCase();
+      if (main.includes('rain')) return 'rainy';
+      if (main.includes('cloud')) return 'cloudy';
+      if (main.includes('clear')) return 'sunny';
+      return 'partly_cloudy';
+    };
 
-    res.json({
-      region: userRegion,
-      location: weatherLocation.name,
+    return {
       current: {
-        temp: forecasts[0].temp,
-        description: forecasts[0].description,
-        humidity: forecasts[0].humidity
+        condition: convertCondition(currentData.weather[0]),
+        temperature: Math.round(currentData.main.temp),
+        humidity: currentData.main.humidity,
+        windSpeed: Math.round(currentData.wind?.speed || 0),
+        description: currentData.weather[0].description,
+        city: currentData.name
       },
-      forecasts,
-      rainAlert: rainComing,
-      message: rainComing
-        ? `${weatherLocation.name}で雨が予想されます。駅周辺の需要が高まります。`
-        : `${weatherLocation.name}で晴天が続く予報です。`,
-      recommendedStations: recommendedStations
-    });
+      forecast: forecastData.list.slice(0, 24).map(item => ({
+        hour: new Date(item.dt * 1000).getHours(),
+        condition: convertCondition(item.weather[0]),
+        temperature: Math.round(item.main.temp),
+        rainProbability: Math.round((item.pop || 0) * 100),
+        description: item.weather[0].description
+      }))
+    };
 
   } catch (error) {
-    console.error('Weather API error:', error.message);
-    res.status(500).json({ error: 'Failed to fetch weather data' });
+    console.error('❌ Weather API error:', error.message);
+    return getMockWeatherData();
+  }
+};
+
+// Fallback mock weather data
+const getMockWeatherData = () => {
+  const weatherConditions = ['sunny', 'cloudy', 'rainy', 'partly_cloudy'];
+  const temperatures = [15, 18, 22, 25, 28, 30];
+
+  return {
+    current: {
+      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
+      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
+      humidity: Math.floor(Math.random() * 40) + 40,
+      windSpeed: Math.floor(Math.random() * 15) + 5,
+      description: 'Mock weather data',
+      city: 'Mock City'
+    },
+    forecast: Array.from({ length: 24 }, (_, i) => ({
+      hour: (new Date().getHours() + i) % 24,
+      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
+      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
+      rainProbability: Math.floor(Math.random() * 100),
+      description: 'Mock forecast'
+    }))
+  };
+};
+
+const calculateDemandLevel = (stationId, hour, weatherCondition) => {
+  const station = ALL_JAPAN_STATIONS.find(s => s.id === stationId);
+  if (!station) return 'low';
+
+  let demandScore = 0;
+
+  // Base demand level
+  const demandLevels = {
+    'very_high': 4,
+    'high': 3,
+    'medium': 2,
+    'low': 1
+  };
+  demandScore += demandLevels[station.demandLevel] || 1;
+
+  // Peak hours bonus
+  if (station.peakHours.includes(hour)) {
+    demandScore += 2;
+  }
+
+  // Weather impact
+  if (weatherCondition === 'rainy' && station.weatherSensitive) {
+    demandScore += 2;
+  }
+
+  // Category bonus
+  if (station.category === 'major_hub') demandScore += 1;
+  if (station.category === 'airport') demandScore += 3;
+
+  if (demandScore >= 6) return 'very_high';
+  if (demandScore >= 4) return 'high';
+  if (demandScore >= 2) return 'medium';
+  return 'low';
+};
+
+const generateAIRecommendations = async (lat, lon, hour, weather) => {
+  const region = getRegionByCoordinates(lat, lon);
+  const regionData = REGIONS[region];
+  const nearbyStations = getNearbyStations(lat, lon, 0.05);
+
+  const recommendations = [];
+
+  // Weather-based recommendations
+  if (weather.current.condition === 'rainy') {
+    const rainStations = nearbyStations.filter(s => s.weatherSensitive);
+    if (rainStations.length > 0) {
+      recommendations.push({
+        type: 'weather',
+        message: `雨のため${rainStations[0].name}周辺の需要が増加中`,
+        priority: 'high',
+        stations: rainStations.slice(0, 2).map(s => s.id)
+      });
+    }
+  }
+
+  // Peak hour recommendations
+  const peakStations = nearbyStations.filter(s => s.peakHours.includes(hour));
+  if (peakStations.length > 0) {
+    recommendations.push({
+      type: 'peak_hours',
+      message: `${hour}:00の需要ピークに備えて${peakStations[0].name}エリアへ`,
+      priority: 'medium',
+      stations: peakStations.slice(0, 2).map(s => s.id)
+    });
+  }
+
+  // High-demand area recommendations
+  const highDemandStations = nearbyStations.filter(s =>
+    calculateDemandLevel(s.id, hour, weather.current.condition) === 'very_high'
+  );
+
+  if (highDemandStations.length > 0) {
+    recommendations.push({
+      type: 'high_demand',
+      message: `${highDemandStations[0].name}は現在高需要エリアです`,
+      priority: 'high',
+      stations: highDemandStations.slice(0, 3).map(s => s.id)
+    });
+  }
+
+  return {
+    region: regionData?.name || '未対応地域',
+    prefecture: regionData?.name || '未対応',
+    recommendations: recommendations.slice(0, 3),
+    coverage: 'nationwide'
+  };
+};
+
+// API Routes
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    coverage: 'nationwide',
+    supportedRegions: Object.keys(REGIONS).length,
+    totalStations: ALL_JAPAN_STATIONS.length,
+    firebase: firestore ? 'connected' : 'disconnected'
+  });
+});
+
+// Get all stations with optional filtering
+app.get('/api/stations', (req, res) => {
+  try {
+    const { region, category, limit } = req.query;
+    let stations = ALL_JAPAN_STATIONS;
+
+    if (region) {
+      stations = getStationsByRegion(region);
+    }
+
+    if (category) {
+      stations = stations.filter(s => s.category === category);
+    }
+
+    if (limit) {
+      stations = stations.slice(0, parseInt(limit));
+    }
+
+    res.json({
+      stations,
+      total: stations.length,
+      regions: Object.keys(REGIONS)
+    });
+  } catch (error) {
+    console.error('Error fetching stations:', error);
+    res.status(500).json({ error: 'Failed to fetch stations' });
   }
 });
 
 // Get stations by region
 app.get('/api/stations/region/:region', (req, res) => {
-  const { region } = req.params;
-  const { demandLevel, category } = req.query;
-
-  let stations = getStationsForRegion(region);
-  let allStations = Object.values(stations).flat();
-
-  // Apply filters
-  if (demandLevel) {
-    allStations = allStations.filter(s => s.demandLevel === demandLevel);
-  }
-
-  if (category) {
-    allStations = allStations.filter(s => s.category === category);
-  }
-
-  res.json({
-    region,
-    prefecture: PREFECTURE_REGIONS[region]?.name || region,
-    count: allStations.length,
-    stations: allStations
-  });
-});
-
-// Detect user's region and get nearby stations
-app.get('/api/stations/nearby-regional', (req, res) => {
-  const { lat, lon, radius = 2 } = req.query;
-
-  if (!lat || !lon) {
-    return res.status(400).json({ error: 'Location coordinates required' });
-  }
-
-  const userLocation = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
-  const region = detectRegion(userLocation);
-  const regionalStations = getStationsForRegion(region);
-  const allStations = Object.values(regionalStations).flat();
-
-  const nearby = getNearbyStations(userLocation, parseFloat(radius), allStations);
-
-  res.json({
-    location: userLocation,
-    detectedRegion: region,
-    prefecture: PREFECTURE_REGIONS[region]?.name || region,
-    radius: parseFloat(radius),
-    stations: nearby
-  });
-});
-
-// Regional AI recommendations
-app.get('/api/recommendations/regional', async (req, res) => {
-  const { lat, lon } = req.query;
-
-  if (!lat || !lon) {
-    return res.status(400).json({ error: 'Location coordinates required' });
-  }
-
-  const driverLocation = { latitude: parseFloat(lat), longitude: parseFloat(lon) };
-  const region = detectRegion(driverLocation);
-  const currentHour = new Date().getHours();
-
-  // Get regional weather
-  const weatherLocation = getWeatherLocationForRegion(region);
-  let weatherCondition = { rain: 0 };
-
   try {
-    if (WEATHER_API_KEY !== 'YOUR_API_KEY_HERE') {
-      const weatherResponse = await axios.get(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${weatherLocation.lat}&lon=${weatherLocation.lon}&appid=${WEATHER_API_KEY}&units=metric`
-      );
-      weatherCondition = {
-        rain: weatherResponse.data.rain ? weatherResponse.data.rain['1h'] || 0 : 0,
-        description: weatherResponse.data.weather[0].description
-      };
+    const { region } = req.params;
+    const stations = getStationsByRegion(region);
+    const regionData = REGIONS[region];
+
+    if (!regionData) {
+      return res.status(404).json({ error: 'Region not found' });
     }
+
+    res.json({
+      region: regionData.name,
+      regionKey: region,
+      stations,
+      total: stations.length
+    });
   } catch (error) {
-    console.error('Weather API error:', error);
+    console.error('Error fetching region stations:', error);
+    res.status(500).json({ error: 'Failed to fetch region stations' });
   }
-
-  const recommendations = getNationwideAIRecommendations(driverLocation, currentHour, weatherCondition);
-
-  res.json({
-    recommendations,
-    currentConditions: {
-      region,
-      prefecture: PREFECTURE_REGIONS[region]?.name || region,
-      hour: currentHour,
-      weather: weatherCondition
-    },
-    timestamp: new Date().toISOString()
-  });
 });
 
-// Get all supported regions
-app.get('/api/regions', (req, res) => {
-  const regions = Object.keys(JAPAN_STATIONS).map(regionKey => ({
-    key: regionKey,
-    name: PREFECTURE_REGIONS[regionKey]?.name || regionKey,
-    stationCount: Object.values(JAPAN_STATIONS[regionKey]).flat().length,
-    weatherSupported: !!WEATHER_LOCATIONS[regionKey]
-  }));
+// Get nearby stations with regional support
+app.get('/api/stations/nearby-regional', (req, res) => {
+  try {
+    const { lat, lon, radius = 0.1 } = req.query;
 
-  res.json({
-    totalRegions: regions.length,
-    regions
-  });
+    if (!lat || !lon) {
+      return res.status(400).json({ error: 'Latitude and longitude required' });
+    }
+
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lon);
+    const searchRadius = parseFloat(radius);
+
+    const detectedRegion = getRegionByCoordinates(latitude, longitude);
+    const regionData = REGIONS[detectedRegion];
+    const nearbyStations = getNearbyStations(latitude, longitude, searchRadius);
+
+    res.json({
+      detectedRegion,
+      prefecture: regionData?.name || '未対応地域',
+      coordinates: { lat: latitude, lon: longitude },
+      radius: searchRadius,
+      stations: nearbyStations,
+      total: nearbyStations.length
+    });
+  } catch (error) {
+    console.error('Error fetching nearby stations:', error);
+    res.status(500).json({ error: 'Failed to fetch nearby stations' });
+  }
 });
 
-// WebSocket handling with regional support
-const connectedDrivers = new Map();
-const connectedCustomers = new Map();
-const activeRides = new Map();
+// Get high-demand stations for current time
+app.get('/api/stations/high-demand', async (req, res) => {
+  try {
+    const { hour, region } = req.query;
+    const currentHour = hour ? parseInt(hour) : new Date().getHours();
+    const weather = await getWeatherForecast(region || 'tokyo');
 
-io.on('connection', (socket) => {
-  console.log('New connection:', socket.id);
-
-  // Driver connects with regional detection
-  socket.on('driver:connect', async (driverData) => {
-    console.log('Driver connected:', driverData);
-
-    const region = driverData.location ? detectRegion(driverData.location) : 'unknown';
-
-    const driverInfo = {
-      ...driverData,
-      socketId: socket.id,
-      status: 'online',
-      location: driverData.location || null,
-      region: region,
-      prefecture: PREFECTURE_REGIONS[region]?.name || region,
-      lastSeen: new Date()
-    };
-
-    connectedDrivers.set(socket.id, driverInfo);
-
-    // Update Firebase with regional info
-    if (db && driverData.driverId) {
-      try {
-        await db.collection('drivers').doc(driverData.driverId).set({
-          ...driverInfo,
-          lastSeen: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      } catch (error) {
-        console.error('Error updating driver status:', error);
-      }
+    let stations = ALL_JAPAN_STATIONS;
+    if (region) {
+      stations = getStationsByRegion(region);
     }
 
-    // Send regional AI recommendations
-    if (driverData.location) {
-      const currentHour = new Date().getHours();
-      const weatherLocation = getWeatherLocationForRegion(region);
-      let weatherCondition = { rain: 0 };
-
-      try {
-        if (WEATHER_API_KEY !== 'YOUR_API_KEY_HERE') {
-          const weatherResponse = await axios.get(
-            `https://api.openweathermap.org/data/2.5/weather?lat=${weatherLocation.lat}&lon=${weatherLocation.lon}&appid=${WEATHER_API_KEY}&units=metric`
-          );
-          weatherCondition.rain = weatherResponse.data.rain ? weatherResponse.data.rain['1h'] || 0 : 0;
-        }
-      } catch (error) {
-        console.error('Weather fetch error:', error);
-      }
-
-      const recommendations = getNationwideAIRecommendations(driverData.location, currentHour, weatherCondition);
-
-      socket.emit('ai:recommendations', {
-        recommendations,
-        region: region,
-        prefecture: PREFECTURE_REGIONS[region]?.name || region,
-        message: `${PREFECTURE_REGIONS[region]?.name || region}のAI推奨エリアが更新されました`
-      });
-    }
-
-    // Notify clients with regional info
-    io.emit('drivers:update', {
-      onlineCount: connectedDrivers.size,
-      driversByRegion: getDriversByRegion()
-    });
-
-    socket.emit('driver:connected', {
-      message: `${PREFECTURE_REGIONS[region]?.name || region}でドライバーとして接続されました`,
-      driverId: driverData.driverId || socket.id,
-      region: region,
-      prefecture: PREFECTURE_REGIONS[region]?.name || region
-    });
-  });
-
-  // Customer connects with regional detection
-  socket.on('customer:connect', (customerData) => {
-    console.log('Customer connected:', customerData);
-
-    const region = customerData.location ? detectRegion(customerData.location) : 'unknown';
-
-    const customerInfo = {
-      ...customerData,
-      socketId: socket.id,
-      location: customerData.location || null,
-      region: region,
-      prefecture: PREFECTURE_REGIONS[region]?.name || region,
-      status: 'idle'
-    };
-
-    connectedCustomers.set(socket.id, customerInfo);
-
-    // Get regional driver count
-    const regionalDrivers = Array.from(connectedDrivers.values())
-      .filter(d => d.status === 'online' && d.region === region).length;
-
-    socket.emit('customer:connected', {
-      message: `${PREFECTURE_REGIONS[region]?.name || region}でお客様として接続されました`,
-      customerId: customerData.customerId || socket.id,
-      region: region,
-      prefecture: PREFECTURE_REGIONS[region]?.name || region,
-      onlineDrivers: regionalDrivers
-    });
-
-    // Send regional nearby stations
-    if (customerData.location) {
-      const regionalStations = getStationsForRegion(region);
-      const allStations = Object.values(regionalStations).flat();
-      const nearbyStations = getNearbyStations(customerData.location, 2, allStations);
-
-      socket.emit('stations:nearby', {
-        stations: nearbyStations,
-        region: region,
-        prefecture: PREFECTURE_REGIONS[region]?.name || region,
-        message: `${PREFECTURE_REGIONS[region]?.name || region}の近くの駅`
-      });
-    }
-  });
-
-  // Enhanced ride request with regional matching
-  socket.on('ride:request', async (rideData) => {
-    console.log('Ride requested with regional context:', rideData);
-
-    const customerRegion = connectedCustomers.get(socket.id)?.region || 'unknown';
-
-    if (connectedCustomers.has(socket.id)) {
-      const customer = connectedCustomers.get(socket.id);
-      customer.status = 'waiting';
-      connectedCustomers.set(socket.id, customer);
-    }
-
-    let rideId = 'ride_' + Date.now();
-
-    // Find regional stations
-    const regionalStations = getStationsForRegion(customerRegion);
-    const allStations = Object.values(regionalStations).flat();
-
-    let pickupStations = [];
-    let destinationStations = [];
-
-    if (rideData.pickupCoords) {
-      pickupStations = getNearbyStations(rideData.pickupCoords, 0.5, allStations);
-    }
-    if (rideData.destinationCoords) {
-      destinationStations = getNearbyStations(rideData.destinationCoords, 0.5, allStations);
-    }
-
-    const enhancedRideData = {
-      ...rideData,
-      rideId,
-      customerSocketId: socket.id,
-      customerRegion: customerRegion,
-      status: 'pending',
-      createdAt: new Date(),
-      pickupStations,
-      destinationStations,
-      estimatedFare: calculateFare(
-        rideData.pickupCoords && rideData.destinationCoords
-          ? calculateDistance(rideData.pickupCoords, rideData.destinationCoords)
-          : 5
+    const highDemandStations = stations
+      .map(station => ({
+        ...station,
+        currentDemand: calculateDemandLevel(station.id, currentHour, weather.current.condition),
+        isPeakHour: station.peakHours.includes(currentHour)
+      }))
+      .filter(station =>
+        station.currentDemand === 'very_high' || station.currentDemand === 'high'
       )
+      .sort((a, b) => {
+        const demandOrder = { 'very_high': 2, 'high': 1 };
+        return demandOrder[b.currentDemand] - demandOrder[a.currentDemand];
+      });
+
+    res.json({
+      hour: currentHour,
+      region: region || 'all',
+      weather: weather.current,
+      stations: highDemandStations,
+      total: highDemandStations.length
+    });
+  } catch (error) {
+    console.error('Error fetching high-demand stations:', error);
+    res.status(500).json({ error: 'Failed to fetch high-demand stations' });
+  }
+});
+
+// Get regional weather forecast
+app.get('/api/weather/forecast-regional', async (req, res) => {
+  try {
+    const { region = 'tokyo' } = req.query;
+    const regionData = REGIONS[region];
+
+    if (!regionData) {
+      return res.status(404).json({ error: 'Region not supported' });
+    }
+
+    const weather = await getWeatherForecast(region);
+
+    res.json({
+      region: regionData.name,
+      location: regionData.nameEn,
+      weather,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error fetching weather:', error);
+    res.status(500).json({ error: 'Failed to fetch weather' });
+  }
+});
+
+// Get AI recommendations with regional support
+app.get('/api/recommendations/regional', async (req, res) => {
+  try {
+    const { lat, lon, hour } = req.query;
+
+    if (!lat || !lon) {
+      return res.status(400).json({ error: 'Latitude and longitude required' });
+    }
+
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lon);
+    const currentHour = hour ? parseInt(hour) : new Date().getHours();
+
+    const region = getRegionByCoordinates(latitude, longitude);
+    const weather = await getWeatherForecast(region);
+    const recommendations = await generateAIRecommendations(latitude, longitude, currentHour, weather);
+
+    res.json({
+      location: { lat: latitude, lon: longitude },
+      hour: currentHour,
+      weather: weather.current,
+      ...recommendations,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error generating recommendations:', error);
+    res.status(500).json({ error: 'Failed to generate recommendations' });
+  }
+});
+
+// User management
+app.post('/api/users', async (req, res) => {
+  try {
+    const { name, phone, role, location } = req.body;
+
+    if (!name || !phone || !role) {
+      return res.status(400).json({ error: 'Name, phone, and role are required' });
+    }
+
+    const user = {
+      id: Date.now().toString(),
+      name,
+      phone,
+      role,
+      location: location || null,
+      createdAt: new Date().toISOString(),
+      isActive: true
     };
 
-    activeRides.set(rideId, enhancedRideData);
+    users.push(user);
 
-    // Save to Firebase with regional context
-    if (db) {
+    // Save to Firestore if available
+    if (firestore) {
       try {
-        await db.collection('rides').add({
-          ...enhancedRideData,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-      } catch (error) {
-        console.error('Error creating ride:', error);
+        await firestore.collection('users').doc(user.id).set(user);
+        console.log('✅ User saved to Firestore');
+      } catch (firestoreError) {
+        console.error('❌ Firestore save error:', firestoreError);
       }
     }
 
-    // Notify only drivers in the same region
-    connectedDrivers.forEach((driver, driverSocketId) => {
-      if (driver.status === 'online' && driver.region === customerRegion) {
-        let distance = null;
-        if (driver.location && rideData.pickupCoords) {
-          distance = calculateDistance(driver.location, rideData.pickupCoords);
-        }
+    console.log(`👤 New ${role} registered: ${name}`);
+    res.json({ success: true, user });
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
 
-        io.to(driverSocketId).emit('ride:new', {
-          ...enhancedRideData,
-          distanceToPickup: distance,
-          pickupStationInfo: pickupStations.length > 0 ? `${pickupStations[0].name}駅近く` : null,
-          destinationStationInfo: destinationStations.length > 0 ? `${destinationStations[0].name}駅近く` : null,
-          region: customerRegion,
-          prefecture: PREFECTURE_REGIONS[customerRegion]?.name || customerRegion
-        });
-      }
-    });
+// Driver management
+app.get('/api/drivers/online', (req, res) => {
+  try {
+    const { region } = req.query;
+    let onlineDrivers = drivers.filter(d => d.isOnline);
 
-    socket.emit('ride:requested', {
-      rideId,
-      message: `${PREFECTURE_REGIONS[customerRegion]?.name || customerRegion}の近くのドライバーに配車リクエストを送信しました`,
-      status: 'pending',
-      region: customerRegion,
-      nearbyStations: pickupStations
-    });
-  });
-
-  // Rest of WebSocket handlers remain similar but with regional context...
-  // (ride:accept, ride:complete, disconnect handlers)
-
-  socket.on('disconnect', async () => {
-    console.log('User disconnected:', socket.id);
-
-    if (connectedDrivers.has(socket.id)) {
-      const driver = connectedDrivers.get(socket.id);
-
-      if (db && driver.driverId) {
-        try {
-          await db.collection('drivers').doc(driver.driverId).update({
-            status: 'offline',
-            lastSeen: admin.firestore.FieldValue.serverTimestamp()
-          });
-        } catch (error) {
-          console.error('Error updating driver offline:', error);
-        }
-      }
-
-      connectedDrivers.delete(socket.id);
-
-      io.emit('drivers:update', {
-        onlineCount: connectedDrivers.size,
-        driversByRegion: getDriversByRegion()
+    if (region) {
+      onlineDrivers = onlineDrivers.filter(d => {
+        if (!d.location) return false;
+        const driverRegion = getRegionByCoordinates(d.location.latitude, d.location.longitude);
+        return driverRegion === region;
       });
     }
 
-    if (connectedCustomers.has(socket.id)) {
-      connectedCustomers.delete(socket.id);
-    }
-  });
+    // Remove WebSocket references for JSON response
+    const driversData = onlineDrivers.map(d => ({
+      id: d.id,
+      name: d.name,
+      location: d.location,
+      isOnline: d.isOnline
+    }));
+
+    res.json({
+      drivers: driversData,
+      total: driversData.length,
+      region: region || 'all'
+    });
+  } catch (error) {
+    console.error('Error fetching drivers:', error);
+    res.status(500).json({ error: 'Failed to fetch drivers' });
+  }
 });
 
-// Helper functions
-function getDriversByRegion() {
-  const regions = {};
-  connectedDrivers.forEach(driver => {
-    if (!regions[driver.region]) {
-      regions[driver.region] = 0;
+// Ride management
+app.post('/api/rides/request', async (req, res) => {
+  try {
+    const {
+      customerId,
+      customerName,
+      pickup,
+      destination,
+      pickupStation,
+      destinationStation
+    } = req.body;
+
+    if (!customerId || !pickup || !destination) {
+      return res.status(400).json({ error: 'Customer ID, pickup, and destination are required' });
     }
-    if (driver.status === 'online') {
-      regions[driver.region]++;
+
+    // Find nearby drivers
+    const region = getRegionByCoordinates(pickup.latitude, pickup.longitude);
+    const nearbyDrivers = drivers.filter(driver => {
+      if (!driver.isOnline || !driver.location) return false;
+
+      const distance = Math.sqrt(
+        Math.pow(pickup.latitude - driver.location.latitude, 2) +
+        Math.pow(pickup.longitude - driver.location.longitude, 2)
+      );
+
+      return distance <= 0.1; // Within ~10km radius
+    });
+
+    const ride = {
+      id: Date.now().toString(),
+      customerId,
+      customerName,
+      pickup,
+      destination,
+      pickupStation: pickupStation || null,
+      destinationStation: destinationStation || null,
+      region,
+      status: 'requested',
+      fare: Math.floor(Math.random() * 2000) + 500, // Mock fare calculation
+      requestedAt: new Date().toISOString(),
+      availableDrivers: nearbyDrivers.length
+    };
+
+    rideRequests.push(ride);
+
+    // Notify nearby drivers
+    nearbyDrivers.forEach(driver => {
+      if (driver.ws && driver.ws.readyState === 1) {
+        driver.ws.send(JSON.stringify({
+          type: 'ride_request',
+          ride: {
+            id: ride.id,
+            customerName: ride.customerName,
+            pickup: ride.pickup,
+            destination: ride.destination,
+            pickupStation: ride.pickupStation,
+            destinationStation: ride.destinationStation,
+            fare: ride.fare
+          }
+        }));
+      }
+    });
+
+    // Save to Firestore if available
+    if (firestore) {
+      try {
+        await firestore.collection('rides').doc(ride.id).set(ride);
+        console.log('✅ Ride saved to Firestore');
+      } catch (firestoreError) {
+        console.error('❌ Firestore save error:', firestoreError);
+      }
     }
-  });
-  return regions;
-}
 
-function calculateDistance(coord1, coord2) {
-  if (!coord1 || !coord2) return null;
+    console.log(`🚕 New ride request: ${customerName} (${nearbyDrivers.length} drivers notified)`);
+    res.json({ success: true, ride, availableDrivers: nearbyDrivers.length });
+  } catch (error) {
+    console.error('Error creating ride request:', error);
+    res.status(500).json({ error: 'Failed to create ride request' });
+  }
+});
 
-  const R = 6371;
-  const dLat = (coord2.latitude - coord1.latitude) * Math.PI / 180;
-  const dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
-  const a =
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(coord1.latitude * Math.PI / 180) * Math.cos(coord2.latitude * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
+// Get ride requests
+app.get('/api/rides/requests', (req, res) => {
+  try {
+    const { status, region } = req.query;
+    let filteredRequests = rideRequests;
 
-function calculateFare(distanceKm) {
-  const baseFare = 500;
-  const perKm = 300;
-  return Math.round(baseFare + (distanceKm * perKm));
-}
+    if (status) {
+      filteredRequests = filteredRequests.filter(r => r.status === status);
+    }
 
-const PORT = process.env.PORT || 3000;
+    if (region) {
+      filteredRequests = filteredRequests.filter(r => r.region === region);
+    }
+
+    res.json({
+      requests: filteredRequests,
+      total: filteredRequests.length
+    });
+  } catch (error) {
+    console.error('Error fetching ride requests:', error);
+    res.status(500).json({ error: 'Failed to fetch ride requests' });
+  }
+});
+
+// Analytics endpoint
+app.get('/api/analytics', (req, res) => {
+  try {
+    const { region } = req.query;
+
+    let filteredUsers = users;
+    let filteredRides = rides;
+    let filteredDrivers = drivers;
+
+    if (region) {
+      filteredRides = rides.filter(r => r.region === region);
+      // Filter drivers and users by region would need location data
+    }
+
+    const analytics = {
+      users: {
+        total: filteredUsers.length,
+        drivers: filteredUsers.filter(u => u.role === 'driver').length,
+        customers: filteredUsers.filter(u => u.role === 'customer').length
+      },
+      rides: {
+        total: filteredRides.length,
+        completed: filteredRides.filter(r => r.status === 'completed').length,
+        active: filteredRides.filter(r => r.status === 'active').length,
+        requested: rideRequests.length
+      },
+      drivers: {
+        total: filteredDrivers.length,
+        online: filteredDrivers.filter(d => d.isOnline).length,
+        offline: filteredDrivers.filter(d => !d.isOnline).length
+      },
+      coverage: {
+        regions: Object.keys(REGIONS).length,
+        stations: ALL_JAPAN_STATIONS.length
+      },
+      region: region || 'all',
+      timestamp: new Date().toISOString()
+    };
+
+    res.json(analytics);
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚕 全国AIタクシー Backend running on port ${PORT}`);
-  console.log(`📡 WebSocket ready for connections`);
-  console.log(`🔥 Firebase: ${db ? 'connected' : 'not connected'}`);
-  console.log(`🌦️ Weather API: ${WEATHER_API_KEY === 'YOUR_API_KEY_HERE' ? 'Not configured' : 'Configured'}`);
-  console.log(`🗾 Coverage: Nationwide Japan (${Object.keys(JAPAN_STATIONS).length} regions)`);
-  console.log(`🚇 Total stations: ${Object.values(JAPAN_STATIONS).reduce((total, region) => total + Object.values(region).flat().length, 0)}`);
+  console.log('📡 WebSocket ready for connections');
+  console.log('🔥 Firebase:', firestore ? 'connected' : 'disconnected');
+  console.log('🌦️ Weather API: Configured');
+  console.log(`🗾 Coverage: Nationwide Japan (${Object.keys(REGIONS).length} regions)`);
+  console.log(`🚇 Total Stations: ${ALL_JAPAN_STATIONS.length}`);
+  console.log('🎯 Ready for Nagoya testing!');
 });
-
-module.exports = app;
