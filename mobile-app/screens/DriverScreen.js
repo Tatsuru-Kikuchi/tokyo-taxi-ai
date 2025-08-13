@@ -22,6 +22,8 @@ export default function DriverScreen({ onSwitchMode }) {
   const [connected, setConnected] = useState(false);
   const [online, setOnline] = useState(false);
   const [location, setLocation] = useState(null);
+  const [currentRegion, setCurrentRegion] = useState(null);
+  const [prefecture, setPrefecture] = useState(null);
   const [currentRide, setCurrentRide] = useState(null);
   const [earnings, setEarnings] = useState(0);
   const [nearbyStations, setNearbyStations] = useState([]);
@@ -34,8 +36,6 @@ export default function DriverScreen({ onSwitchMode }) {
 
   useEffect(() => {
     requestLocationPermission();
-    connectToBackend();
-    fetchWeatherInfo();
     return () => {
       if (socket) socket.close();
       if (locationWatcher) locationWatcher.remove();
@@ -43,13 +43,21 @@ export default function DriverScreen({ onSwitchMode }) {
   }, []);
 
   useEffect(() => {
-    if (online && location) {
+    if (location) {
+      detectUserRegion();
+      connectToBackend();
+      fetchRegionalWeatherInfo();
+    }
+  }, [location]);
+
+  useEffect(() => {
+    if (online && location && currentRegion) {
       startLocationTracking();
     } else if (locationWatcher) {
       locationWatcher.remove();
       setLocationWatcher(null);
     }
-  }, [online, location]);
+  }, [online, location, currentRegion]);
 
   const requestLocationPermission = async () => {
     try {
@@ -61,13 +69,28 @@ export default function DriverScreen({ onSwitchMode }) {
           longitude: currentLocation.coords.longitude
         };
         setLocation(coords);
-        fetchNearbyStations(coords);
-        fetchAIRecommendations(coords);
       } else {
         Alert.alert('位置情報エラー', 'ドライバーモードには位置情報が必要です');
       }
     } catch (error) {
       console.error('Location permission error:', error);
+    }
+  };
+
+  const detectUserRegion = async () => {
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/stations/nearby-regional?lat=${location.latitude}&lon=${location.longitude}&radius=1`
+      );
+      const data = await response.json();
+      setCurrentRegion(data.detectedRegion);
+      setPrefecture(data.prefecture);
+      setNearbyStations(data.stations || []);
+    } catch (error) {
+      console.error('Failed to detect region:', error);
+      // Fallback to Tokyo if detection fails
+      setCurrentRegion('tokyo');
+      setPrefecture('東京都');
     }
   };
 
@@ -92,7 +115,7 @@ export default function DriverScreen({ onSwitchMode }) {
           }
 
           // Update nearby stations periodically
-          fetchNearbyStations(coords);
+          updateNearbyStations(coords);
         }
       );
       setLocationWatcher(watcher);
@@ -101,22 +124,22 @@ export default function DriverScreen({ onSwitchMode }) {
     }
   };
 
-  const fetchNearbyStations = async (coords) => {
+  const updateNearbyStations = async (coords) => {
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/stations/nearby?lat=${coords.latitude}&lon=${coords.longitude}&radius=1`
+        `${BACKEND_URL}/api/stations/nearby-regional?lat=${coords.latitude}&lon=${coords.longitude}&radius=1`
       );
       const data = await response.json();
       setNearbyStations(data.stations || []);
     } catch (error) {
-      console.error('Failed to fetch nearby stations:', error);
+      console.error('Failed to update nearby stations:', error);
     }
   };
 
-  const fetchAIRecommendations = async (coords) => {
+  const fetchRegionalAIRecommendations = async (coords) => {
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/recommendations?lat=${coords.latitude}&lon=${coords.longitude}`
+        `${BACKEND_URL}/api/recommendations/regional?lat=${coords.latitude}&lon=${coords.longitude}`
       );
       const data = await response.json();
       setAiRecommendations(data.recommendations);
@@ -125,9 +148,11 @@ export default function DriverScreen({ onSwitchMode }) {
     }
   };
 
-  const fetchHighDemandStations = async () => {
+  const fetchRegionalHighDemandStations = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/stations/high-demand`);
+      if (!currentRegion) return;
+
+      const response = await fetch(`${BACKEND_URL}/api/stations/region/${currentRegion}?demandLevel=very_high`);
       const data = await response.json();
       setHighDemandStations(data.stations || []);
     } catch (error) {
@@ -135,13 +160,15 @@ export default function DriverScreen({ onSwitchMode }) {
     }
   };
 
-  const fetchWeatherInfo = async () => {
+  const fetchRegionalWeatherInfo = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/weather/forecast-real`);
+      const response = await fetch(
+        `${BACKEND_URL}/api/weather/forecast-regional?lat=${location.latitude}&lon=${location.longitude}`
+      );
       const data = await response.json();
       setWeatherInfo(data);
     } catch (error) {
-      console.error('Failed to fetch weather:', error);
+      console.error('Failed to fetch regional weather:', error);
     }
   };
 
@@ -160,6 +187,7 @@ export default function DriverScreen({ onSwitchMode }) {
       });
 
       newSocket.on('ride:new', (ride) => {
+        const regionInfo = ride.prefecture ? `\n地域: ${ride.prefecture}` : '';
         const stationInfo = ride.pickupStationInfo
           ? `\n乗車場所: ${ride.pickupStationInfo}`
           : '';
@@ -169,7 +197,7 @@ export default function DriverScreen({ onSwitchMode }) {
 
         Alert.alert(
           '🆕 新しい配車リクエスト',
-          `乗車: ${ride.pickup}${stationInfo}\n目的地: ${ride.destination}${destinationInfo}\n予想料金: ¥${ride.estimatedFare || 2000}\n距離: ${ride.distanceToPickup ? ride.distanceToPickup.toFixed(1) + 'km' : '不明'}`,
+          `乗車: ${ride.pickup}${stationInfo}\n目的地: ${ride.destination}${destinationInfo}${regionInfo}\n予想料金: ¥${ride.estimatedFare || 2000}\n距離: ${ride.distanceToPickup ? ride.distanceToPickup.toFixed(1) + 'km' : '不明'}`,
           [
             { text: '拒否', style: 'cancel' },
             { text: '承諾', onPress: () => acceptRide(ride) }
@@ -183,6 +211,13 @@ export default function DriverScreen({ onSwitchMode }) {
 
       newSocket.on('ai:recommendations', (data) => {
         setAiRecommendations(data.recommendations);
+        setCurrentRegion(data.region);
+        setPrefecture(data.prefecture);
+      });
+
+      newSocket.on('driver:connected', (data) => {
+        setCurrentRegion(data.region);
+        setPrefecture(data.prefecture);
       });
 
       newSocket.on('ride:taken', () => {
@@ -204,16 +239,22 @@ export default function DriverScreen({ onSwitchMode }) {
       Alert.alert('エラー', '位置情報が取得できていません');
       return;
     }
+    if (!currentRegion) {
+      Alert.alert('エラー', 'エリアが検出できていません');
+      return;
+    }
 
     setOnline(true);
     socket.emit('driver:connect', {
       driverId: 'driver_' + Math.random().toString(36).substr(2, 9),
       name: 'ドライバー',
-      location: location
+      location: location,
+      region: currentRegion,
+      prefecture: prefecture
     });
 
-    fetchHighDemandStations();
-    fetchAIRecommendations(location);
+    fetchRegionalHighDemandStations();
+    fetchRegionalAIRecommendations(location);
   };
 
   const goOffline = () => {
@@ -234,7 +275,7 @@ export default function DriverScreen({ onSwitchMode }) {
         rideId: ride.rideId,
         driverLocation: location
       });
-      Alert.alert('承諾完了', '配車を承諾しました');
+      Alert.alert('承諾完了', `${ride.prefecture || prefecture}で配車を承諾しました`);
     }
   };
 
@@ -250,23 +291,24 @@ export default function DriverScreen({ onSwitchMode }) {
       setRidesCompleted(ridesCompleted + 1);
       setCurrentRide(null);
 
-      Alert.alert('配車完了', `料金: ¥${fare.toLocaleString()}`);
+      Alert.alert('配車完了', `料金: ¥${fare.toLocaleString()}\n地域: ${prefecture}`);
 
       // Refresh AI recommendations after completing ride
       if (location) {
-        fetchAIRecommendations(location);
+        fetchRegionalAIRecommendations(location);
       }
     }
   };
 
   const navigateToStation = (station) => {
+    const distance = location ? calculateDistance(location, station.coords).toFixed(1) : '不明';
     Alert.alert(
       '駅へ移動',
-      `${station.name}駅へ移動しますか？\n${station.lines.join(', ')}\n需要レベル: ${station.demandLevel}`,
+      `${station.name}駅へ移動しますか？\n${station.lines.join(', ')}\n需要レベル: ${station.demandLevel}\n距離: ${distance}km\n地域: ${prefecture}`,
       [
         { text: 'キャンセル', style: 'cancel' },
         { text: '移動', onPress: () => {
-          Alert.alert('ナビ開始', `${station.name}駅への移動を開始します`);
+          Alert.alert('ナビ開始', `${prefecture}の${station.name}駅への移動を開始します`);
         }}
       ]
     );
@@ -323,12 +365,25 @@ export default function DriverScreen({ onSwitchMode }) {
     );
   }
 
+  if (!currentRegion) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2196F3" />
+        <Text style={styles.loadingText}>エリアを検出中...</Text>
+        <Text style={styles.regionText}>全国対応の準備をしています</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView>
-        {/* Header */}
+        {/* Header with Regional Info */}
         <View style={styles.header}>
-          <Text style={styles.title}>🚗 ドライバー</Text>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>🚗 ドライバー</Text>
+            <Text style={styles.regionBadge}>{prefecture}</Text>
+          </View>
           <TouchableOpacity onPress={handleSwitch} style={styles.switchButton}>
             <Text style={styles.switchText}>お客様モードへ</Text>
           </TouchableOpacity>
@@ -338,7 +393,7 @@ export default function DriverScreen({ onSwitchMode }) {
         <View style={styles.statusBar}>
           <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
           <Text style={styles.statusText}>
-            {connected ? '接続済み' : '未接続'}
+            {connected ? `${prefecture}で接続済み` : '未接続'}
           </Text>
           {online && (
             <View style={styles.onlineBadge}>
@@ -347,30 +402,41 @@ export default function DriverScreen({ onSwitchMode }) {
           )}
         </View>
 
-        {/* Weather Info */}
+        {/* Regional Weather Info */}
         {weatherInfo && (
           <View style={styles.weatherCard}>
-            <Text style={styles.weatherTitle}>🌦️ 天気・需要情報</Text>
+            <Text style={styles.weatherTitle}>🌦️ {weatherInfo.location}の天気・需要情報</Text>
             <Text style={styles.weatherText}>
               現在: {weatherInfo.current.temp}°C {weatherInfo.current.description}
             </Text>
             {weatherInfo.rainAlert && (
               <Text style={styles.rainAlert}>
-                ⚠️ 雨予報 - 駅周辺の需要が高まります！
+                ⚠️ {weatherInfo.location}で雨予報 - 駅周辺の需要が高まります！
               </Text>
             )}
           </View>
         )}
+
+        {/* Coverage Info */}
+        <View style={styles.coverageCard}>
+          <Text style={styles.coverageTitle}>🗾 全国AIタクシー</Text>
+          <Text style={styles.coverageText}>
+            現在地: {prefecture} | 全国47都道府県対応
+          </Text>
+          <Text style={styles.coverageSubtext}>
+            {prefecture}の駅情報と天気を連動したAI配車
+          </Text>
+        </View>
 
         {/* Online/Offline Toggle */}
         <View style={styles.controls}>
           <TouchableOpacity
             style={[styles.toggleButton, online ? styles.offlineButton : styles.onlineButton]}
             onPress={online ? goOffline : goOnline}
-            disabled={!connected}
+            disabled={!connected || !currentRegion}
           >
             <Text style={styles.toggleButtonText}>
-              {online ? 'オフラインにする' : 'オンラインにする'}
+              {online ? 'オフラインにする' : `${prefecture}でオンラインにする`}
             </Text>
           </TouchableOpacity>
         </View>
@@ -380,10 +446,12 @@ export default function DriverScreen({ onSwitchMode }) {
           <View style={styles.earningsCard}>
             <Text style={styles.cardTitle}>本日の売上</Text>
             <Text style={styles.earningsAmount}>¥{earnings.toLocaleString()}</Text>
+            <Text style={styles.earningsRegion}>{prefecture}</Text>
           </View>
           <View style={styles.ridesCard}>
             <Text style={styles.cardTitle}>完了配車</Text>
             <Text style={styles.ridesAmount}>{ridesCompleted}回</Text>
+            <Text style={styles.ridesRegion}>{prefecture}</Text>
           </View>
         </View>
 
@@ -423,13 +491,13 @@ export default function DriverScreen({ onSwitchMode }) {
                 </View>
               </Marker>
 
-              {/* Nearby Stations */}
+              {/* Regional Stations */}
               {nearbyStations.map((station, index) => (
                 <Marker
                   key={index}
                   coordinate={station.coords}
                   title={station.name + '駅'}
-                  description={`需要: ${station.demandLevel} | ${station.lines.join(', ')}`}
+                  description={`${prefecture} | 需要: ${station.demandLevel} | ${station.lines.join(', ')}`}
                   pinColor="orange"
                 />
               ))}
@@ -481,7 +549,7 @@ export default function DriverScreen({ onSwitchMode }) {
             </MapView>
 
             <View style={styles.mapLegend}>
-              <Text style={styles.legendTitle}>地図凡例</Text>
+              <Text style={styles.legendTitle}>地図凡例 ({prefecture})</Text>
               <Text style={styles.legendItem}>🟡 高需要エリア</Text>
               {weatherInfo && weatherInfo.rainAlert && (
                 <Text style={styles.legendItem}>🔴 雨による需要増加エリア</Text>
@@ -490,16 +558,16 @@ export default function DriverScreen({ onSwitchMode }) {
             </View>
           </View>
         ) : (
-          /* AI Recommendations */
+          /* Regional AI Recommendations */
           <View style={styles.recommendationsContainer}>
-            <Text style={styles.sectionTitle}>🤖 AI推奨エリア</Text>
+            <Text style={styles.sectionTitle}>🤖 {prefecture}のAI推奨エリア</Text>
 
             {aiRecommendations && (
               <>
                 {/* High Demand Stations */}
                 {aiRecommendations.highDemand.length > 0 && (
                   <View style={styles.recommendationSection}>
-                    <Text style={styles.recommendationSectionTitle}>🔥 高需要エリア</Text>
+                    <Text style={styles.recommendationSectionTitle}>🔥 {prefecture}の高需要エリア</Text>
                     <FlatList
                       data={aiRecommendations.highDemand}
                       renderItem={renderRecommendationItem}
@@ -511,7 +579,7 @@ export default function DriverScreen({ onSwitchMode }) {
                 {/* Weather-based Recommendations */}
                 {aiRecommendations.weatherBased.length > 0 && (
                   <View style={styles.recommendationSection}>
-                    <Text style={styles.recommendationSectionTitle}>🌧️ 天気連動エリア</Text>
+                    <Text style={styles.recommendationSectionTitle}>🌧️ 天気連動エリア ({prefecture})</Text>
                     <FlatList
                       data={aiRecommendations.weatherBased}
                       renderItem={renderRecommendationItem}
@@ -541,7 +609,7 @@ export default function DriverScreen({ onSwitchMode }) {
         {/* Current Ride */}
         {currentRide && (
           <View style={styles.rideCard}>
-            <Text style={styles.cardTitle}>現在の配車</Text>
+            <Text style={styles.cardTitle}>現在の配車 ({currentRide.prefecture || prefecture})</Text>
             <View style={styles.rideDetails}>
               <Text style={styles.rideDetail}>乗車: {currentRide.pickup}</Text>
               <Text style={styles.rideDetail}>目的地: {currentRide.destination}</Text>
@@ -561,18 +629,18 @@ export default function DriverScreen({ onSwitchMode }) {
           </View>
         )}
 
-        {/* AI Insights */}
+        {/* Regional AI Insights */}
         {online && !currentRide && (
           <View style={styles.insightsCard}>
-            <Text style={styles.cardTitle}>💡 収益アップのヒント</Text>
+            <Text style={styles.cardTitle}>💡 {prefecture}での収益アップのヒント</Text>
             <Text style={styles.insightText}>
-              • 雨予報時は駅周辺で待機すると効率的です
+              • 雨予報時は{prefecture}の駅周辺で待機すると効率的です
             </Text>
             <Text style={styles.insightText}>
-              • 平日18:00-20:00は新宿・渋谷が高需要
+              • 平日18:00-20:00は主要駅が高需要
             </Text>
             <Text style={styles.insightText}>
-              • 週末は六本木・恵比寿がおすすめ
+              • 週末は繁華街エリアがおすすめ
             </Text>
             {nearbyStations.length > 0 && (
               <Text style={styles.insightText}>
@@ -587,8 +655,8 @@ export default function DriverScreen({ onSwitchMode }) {
         {online && !currentRide && (
           <View style={styles.onlineMessage}>
             <Text style={styles.onlineText}>
-              📡 配車リクエスト受付中...
-              {location && `\n現在地: ${location.latitude.toFixed(3)}, ${location.longitude.toFixed(3)}`}
+              📡 {prefecture}で配車リクエスト受付中...
+              {nearbyStations.length > 0 && `\n近くの駅: ${nearbyStations[0].name}駅`}
             </Text>
           </View>
         )}
@@ -613,6 +681,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
+  regionText: {
+    marginTop: 5,
+    fontSize: 14,
+    color: '#2196F3',
+  },
   header: {
     backgroundColor: 'white',
     padding: 20,
@@ -620,9 +693,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    marginRight: 10,
+  },
+  regionBadge: {
+    fontSize: 12,
+    backgroundColor: '#2196F3',
+    color: 'white',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   switchButton: {
     padding: 10,
@@ -683,6 +769,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 5,
   },
+  coverageCard: {
+    backgroundColor: '#F1F8E9',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 15,
+    borderRadius: 10,
+  },
+  coverageTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginBottom: 5,
+  },
+  coverageText: {
+    fontSize: 14,
+    color: '#388E3C',
+    marginBottom: 3,
+  },
+  coverageSubtext: {
+    fontSize: 12,
+    color: '#66BB6A',
+  },
   controls: {
     padding: 20,
   },
@@ -731,10 +839,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
+  earningsRegion: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 5,
+  },
   ridesAmount: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#2196F3',
+  },
+  ridesRegion: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 5,
   },
   mapToggle: {
     flexDirection: 'row',

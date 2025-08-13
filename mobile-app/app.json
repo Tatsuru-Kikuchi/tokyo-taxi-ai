@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "東京AIタクシー",
+    "name": "全国AIタクシー",
     "slug": "tokyo-taxi-ai",
-    "version": "2.2.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,8 +16,8 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
-      "buildNumber": "29",
+      "bundleIdentifier": "com.tatsuru-kikuchi.zenkoku-ai-taxi",
+      "buildNumber": "30",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "このアプリは、お客様とドライバーをマッチングするために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信するために位置情報を使用します",
@@ -30,7 +30,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
-      "versionCode": 29
+      "versionCode": 30
     },
     "web": {
       "favicon": "./assets/favicon.png"

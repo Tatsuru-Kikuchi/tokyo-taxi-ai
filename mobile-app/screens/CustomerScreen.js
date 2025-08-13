@@ -19,12 +19,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // CHANGE THIS TO YOUR PRODUCTION URL
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
-const LINE_OA_ID = '@dhai52765howdah'; // Add your LINE Official Account ID
+const LINE_OA_ID = '@dhai52765howdah';
 
 export default function CustomerScreen({ onSwitchMode }) {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [location, setLocation] = useState(null);
+  const [currentRegion, setCurrentRegion] = useState(null);
+  const [prefecture, setPrefecture] = useState(null);
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
@@ -41,12 +43,18 @@ export default function CustomerScreen({ onSwitchMode }) {
 
   useEffect(() => {
     requestLocationPermission();
-    connectToBackend();
-    fetchWeatherInfo();
     return () => {
       if (socket) socket.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (location) {
+      detectUserRegion();
+      connectToBackend();
+      fetchRegionalWeatherInfo();
+    }
+  }, [location]);
 
   const requestLocationPermission = async () => {
     try {
@@ -59,7 +67,6 @@ export default function CustomerScreen({ onSwitchMode }) {
         };
         setLocation(coords);
         setPickupCoords(coords);
-        fetchNearbyStations(coords);
       } else {
         Alert.alert('位置情報エラー', '位置情報の使用を許可してください');
       }
@@ -68,25 +75,32 @@ export default function CustomerScreen({ onSwitchMode }) {
     }
   };
 
-  const fetchNearbyStations = async (coords) => {
+  const detectUserRegion = async () => {
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/stations/nearby?lat=${coords.latitude}&lon=${coords.longitude}&radius=2`
+        `${BACKEND_URL}/api/stations/nearby-regional?lat=${location.latitude}&lon=${location.longitude}&radius=2`
       );
       const data = await response.json();
+      setCurrentRegion(data.detectedRegion);
+      setPrefecture(data.prefecture);
       setNearbyStations(data.stations || []);
     } catch (error) {
-      console.error('Failed to fetch nearby stations:', error);
+      console.error('Failed to detect region:', error);
+      // Fallback to Tokyo if detection fails
+      setCurrentRegion('tokyo');
+      setPrefecture('東京都');
     }
   };
 
-  const fetchWeatherInfo = async () => {
+  const fetchRegionalWeatherInfo = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/weather/forecast-real`);
+      const response = await fetch(
+        `${BACKEND_URL}/api/weather/forecast-regional?lat=${location.latitude}&lon=${location.longitude}`
+      );
       const data = await response.json();
       setWeatherInfo(data);
     } catch (error) {
-      console.error('Failed to fetch weather:', error);
+      console.error('Failed to fetch regional weather:', error);
     }
   };
 
@@ -109,7 +123,9 @@ export default function CustomerScreen({ onSwitchMode }) {
       });
 
       newSocket.on('drivers:update', (data) => {
-        setOnlineDrivers(data.onlineCount || 0);
+        // Regional driver count
+        const regionalCount = data.driversByRegion?.[currentRegion] || 0;
+        setOnlineDrivers(regionalCount);
       });
 
       newSocket.on('drivers:nearby', (drivers) => {
@@ -120,16 +136,31 @@ export default function CustomerScreen({ onSwitchMode }) {
         setNearbyStations(data.stations || []);
       });
 
+      newSocket.on('customer:connected', (data) => {
+        setCurrentRegion(data.region);
+        setPrefecture(data.prefecture);
+        setOnlineDrivers(data.onlineDrivers || 0);
+      });
+
       newSocket.on('ride:accepted', (data) => {
         setRideStatus('accepted');
         setDriverLocation(data.driverLocation);
         setEta(data.estimatedArrival);
-        Alert.alert('🚕 ドライバーが見つかりました！', `ドライバーが向かっています。\n到着予定: ${data.estimatedArrival}`);
+        Alert.alert(
+          '🚕 ドライバーが見つかりました！',
+          `${prefecture}のドライバーが向かっています。\n到着予定: ${data.estimatedArrival}`
+        );
       });
 
       newSocket.on('driver:location', (data) => {
         setDriverLocation(data.location);
         setEta(data.eta);
+      });
+
+      newSocket.on('ride:requested', (data) => {
+        if (data.region) {
+          setCurrentRegion(data.region);
+        }
       });
 
       setSocket(newSocket);
@@ -208,12 +239,19 @@ export default function CustomerScreen({ onSwitchMode }) {
       return;
     }
 
+    if (!currentRegion) {
+      Alert.alert('エラー', 'エリアを検出できていません。位置情報を確認してください。');
+      return;
+    }
+
     setRideStatus('requesting');
     socket.emit('ride:request', {
       pickup,
       destination,
       pickupCoords,
       destinationCoords,
+      region: currentRegion,
+      prefecture: prefecture,
       timestamp: new Date().toISOString()
     });
   };
@@ -238,6 +276,10 @@ export default function CustomerScreen({ onSwitchMode }) {
         onPress={() => selectStation(item, true)}
       >
         <Text style={styles.stationName}>{item.name}駅</Text>
+        <Text style={styles.stationLines}>
+          {item.lines.slice(0, 2).join(', ')}
+          {item.lines.length > 2 && ` 他${item.lines.length - 2}線`}
+        </Text>
         <Text style={styles.stationDistance}>
           {location ? `${calculateDistance(location, item.coords).toFixed(1)}km` : ''}
         </Text>
@@ -260,12 +302,25 @@ export default function CustomerScreen({ onSwitchMode }) {
     );
   }
 
+  if (!currentRegion) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+        <Text style={styles.loadingText}>エリアを検出中...</Text>
+        <Text style={styles.regionText}>全国対応の準備をしています</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView>
-        {/* Header */}
+        {/* Header with Regional Info */}
         <View style={styles.header}>
-          <Text style={styles.title}>🚕 お客様</Text>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>🚕 お客様</Text>
+            <Text style={styles.regionBadge}>{prefecture}</Text>
+          </View>
           <TouchableOpacity onPress={handleSwitch} style={styles.switchButton}>
             <Text style={styles.switchText}>ドライバーモードへ</Text>
           </TouchableOpacity>
@@ -276,23 +331,36 @@ export default function CustomerScreen({ onSwitchMode }) {
           <View style={[styles.dot, { backgroundColor: connected ? '#4CAF50' : '#f44336' }]} />
           <Text style={styles.statusText}>
             {connected
-              ? `${onlineDrivers}名のドライバーが待機中`
+              ? `${prefecture}で${onlineDrivers}名のドライバーが待機中`
               : '接続中...'}
           </Text>
         </View>
 
-        {/* Weather Info */}
+        {/* Regional Weather Info */}
         {weatherInfo && (
           <View style={styles.weatherCard}>
-            <Text style={styles.weatherTitle}>🌦️ 天気情報</Text>
+            <Text style={styles.weatherTitle}>🌦️ {weatherInfo.location}の天気情報</Text>
             <Text style={styles.weatherText}>
               現在: {weatherInfo.current.temp}°C {weatherInfo.current.description}
             </Text>
             {weatherInfo.rainAlert && (
-              <Text style={styles.rainAlert}>⚠️ 雨予報 - 需要が高まる可能性があります</Text>
+              <Text style={styles.rainAlert}>
+                ⚠️ {weatherInfo.location}で雨予報 - 駅周辺の需要が高まる可能性があります
+              </Text>
             )}
           </View>
         )}
+
+        {/* Coverage Info */}
+        <View style={styles.coverageCard}>
+          <Text style={styles.coverageTitle}>🗾 全国AIタクシー</Text>
+          <Text style={styles.coverageText}>
+            現在地: {prefecture} | 全国47都道府県対応
+          </Text>
+          <Text style={styles.coverageSubtext}>
+            地域の駅情報と天気を連動したAI配車
+          </Text>
+        </View>
 
         {/* Map Toggle */}
         <View style={styles.mapToggle}>
@@ -318,8 +386,8 @@ export default function CustomerScreen({ onSwitchMode }) {
               initialRegion={{
                 latitude: location.latitude,
                 longitude: location.longitude,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
               }}
               showsUserLocation={true}
               onPress={(e) => selectLocationOnMap(e.nativeEvent.coordinate, true)}
@@ -337,13 +405,13 @@ export default function CustomerScreen({ onSwitchMode }) {
                 <Marker coordinate={destinationCoords} title="目的地" pinColor="red" />
               )}
 
-              {/* Nearby Stations */}
+              {/* Regional Stations */}
               {nearbyStations.map((station, index) => (
                 <Marker
                   key={index}
                   coordinate={station.coords}
                   title={station.name + '駅'}
-                  description={station.lines.join(', ')}
+                  description={`${prefecture} | ${station.lines.join(', ')}`}
                   pinColor="orange"
                 />
               ))}
@@ -377,7 +445,7 @@ export default function CustomerScreen({ onSwitchMode }) {
 
               {/* Weather-sensitive areas */}
               {weatherInfo && weatherInfo.rainAlert && nearbyStations
-                .filter(s => s.demandLevel === 'very_high')
+                .filter(s => s.weatherSensitive)
                 .map((station, index) => (
                   <Circle
                     key={`weather-${index}`}
@@ -406,13 +474,19 @@ export default function CustomerScreen({ onSwitchMode }) {
         ) : (
           /* Station Selection */
           <View style={styles.stationContainer}>
-            <Text style={styles.sectionTitle}>近くの駅から選択</Text>
-            <FlatList
-              data={nearbyStations}
-              renderItem={renderStationItem}
-              keyExtractor={(item) => item.id}
-              style={styles.stationList}
-            />
+            <Text style={styles.sectionTitle}>{prefecture}の駅から選択</Text>
+            {nearbyStations.length > 0 ? (
+              <FlatList
+                data={nearbyStations}
+                renderItem={renderStationItem}
+                keyExtractor={(item) => item.id}
+                style={styles.stationList}
+              />
+            ) : (
+              <Text style={styles.noStationsText}>
+                近くの駅データを読み込み中...
+              </Text>
+            )}
           </View>
         )}
 
@@ -463,7 +537,7 @@ export default function CustomerScreen({ onSwitchMode }) {
             disabled={!connected || rideStatus !== 'idle' || !pickupCoords || !destinationCoords}
           >
             <Text style={styles.bookButtonText}>
-              {rideStatus === 'idle' ? '配車をリクエスト' : '処理中...'}
+              {rideStatus === 'idle' ? `${prefecture}で配車をリクエスト` : '処理中...'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -472,7 +546,7 @@ export default function CustomerScreen({ onSwitchMode }) {
         {rideStatus === 'requesting' && (
           <View style={styles.statusCard}>
             <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.statusTitle}>ドライバーを探しています...</Text>
+            <Text style={styles.statusTitle}>{prefecture}のドライバーを探しています...</Text>
             <Text style={styles.statusSubtitle}>しばらくお待ちください</Text>
           </View>
         )}
@@ -480,7 +554,7 @@ export default function CustomerScreen({ onSwitchMode }) {
         {rideStatus === 'accepted' && (
           <View style={styles.statusCard}>
             <Text style={styles.emoji}>🚕</Text>
-            <Text style={styles.statusTitle}>ドライバーが向かっています！</Text>
+            <Text style={styles.statusTitle}>{prefecture}のドライバーが向かっています！</Text>
             {eta && <Text style={styles.etaText}>到着予定: {eta}</Text>}
             <TouchableOpacity
               style={styles.cancelButton}
@@ -499,10 +573,10 @@ export default function CustomerScreen({ onSwitchMode }) {
           </View>
         )}
 
-        {/* Nearby Stations Info */}
+        {/* Regional Stations Info */}
         {nearbyStations.length > 0 && showMap && (
           <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>🚇 近くの駅情報</Text>
+            <Text style={styles.infoTitle}>🚇 {prefecture}の近くの駅情報</Text>
             {nearbyStations.slice(0, 3).map((station, index) => (
               <View key={index} style={styles.stationInfo}>
                 <Text style={styles.stationInfoName}>{station.name}駅</Text>
@@ -538,6 +612,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
+  regionText: {
+    marginTop: 5,
+    fontSize: 14,
+    color: '#4CAF50',
+  },
   header: {
     backgroundColor: 'white',
     padding: 20,
@@ -545,9 +624,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    marginRight: 10,
+  },
+  regionBadge: {
+    fontSize: 12,
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   switchButton: {
     padding: 10,
@@ -594,6 +686,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#f44336',
     marginTop: 5,
+  },
+  coverageCard: {
+    backgroundColor: '#F1F8E9',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 15,
+    borderRadius: 10,
+  },
+  coverageTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginBottom: 5,
+  },
+  coverageText: {
+    fontSize: 14,
+    color: '#388E3C',
+    marginBottom: 3,
+  },
+  coverageSubtext: {
+    fontSize: 12,
+    color: '#66BB6A',
   },
   mapToggle: {
     flexDirection: 'row',
@@ -685,6 +799,12 @@ const styles = StyleSheet.create({
   stationList: {
     maxHeight: 300,
   },
+  noStationsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    padding: 20,
+  },
   stationItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -701,9 +821,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  stationDistance: {
+  stationLines: {
     fontSize: 12,
     color: '#666',
+    marginTop: 2,
+  },
+  stationDistance: {
+    fontSize: 12,
+    color: '#4CAF50',
     marginTop: 2,
   },
   destinationButton: {
