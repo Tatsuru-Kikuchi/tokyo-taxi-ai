@@ -12,7 +12,7 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
