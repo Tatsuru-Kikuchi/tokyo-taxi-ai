@@ -14,11 +14,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
-      "buildNumber": "56",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
-        "LSApplicationQueriesSchemes": ["line"]
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -27,19 +26,12 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
-      "versionCode": 56,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_COARSE_LOCATION"
       ]
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
     "extra": {
-      "backendUrl": "https://tokyo-taxi-ai-backend.railway.app",
-      "weatherApiKey": "bd17578f85cb46d681ca3e4f3bdc9963",
       "eas": {
         "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }
