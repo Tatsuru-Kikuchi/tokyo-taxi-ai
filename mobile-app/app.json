@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "全国AIタクシー",
-    "slug": "zenkoku-ai-taxi",
+    "slug": "tokyo-taxi-ai",
     "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,119 +9,40 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#6366f1"
+      "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.tatsuru-kikuchi.zenkoku-ai-taxi",
-      "buildNumber": "33",
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
+      "buildNumber": "56",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "このアプリは全国の駅情報と連携し、お客様とドライバーをマッチングするために位置情報を使用します",
-        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車リクエストを受信し、AI天気予測機能を提供するために位置情報を使用します",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "全国AIタクシーは、最適な配車とAI推奨機能のために常時位置情報を使用します",
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "QRコードスキャンやプロフィール写真撮影のためにカメラを使用します",
-        "NSPhotoLibraryUsageDescription": "プロフィール写真選択のためにフォトライブラリにアクセスします",
-        "NSMicrophoneUsageDescription": "音声サポート機能のためにマイクを使用します",
-        "NSContactsUsageDescription": "緊急連絡先登録のために連絡先にアクセスします",
-        "UIBackgroundModes": [
-          "background-fetch",
-          "location"
-        ],
-        "LSApplicationQueriesSchemes": [
-          "line",
-          "tel",
-          "mailto"
-        ]
-      },
-      "config": {
-        "googleMapsApiKey": "AIzaSyD3s9ewOUj83nQkMHP8kcc8Obhe8tshi5E"
+        "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
+        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
+        "LSApplicationQueriesSchemes": ["line"]
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#6366f1"
+        "backgroundColor": "#ffffff"
       },
-      "package": "com.tatsuru_kikuchi.zenkoku_ai_taxi",
-      "versionCode": 33,
+      "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
+      "versionCode": 56,
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO",
-        "READ_CONTACTS",
-        "VIBRATE",
-        "WAKE_LOCK",
-        "RECEIVE_BOOT_COMPLETED"
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyD3s9ewOUj83nQkMHP8kcc8Obhe8tshi5E"
-        }
-      },
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "data": [
-            {
-              "scheme": "https",
-              "host": "line.me"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "web": {
-      "bundler": "metro"
-    },
-    "plugins": [
-      "expo-location",
-      "expo-linking",
-      "expo-notifications",
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "deploymentTarget": "13.0"
-          },
-          "android": {
-            "compileSdkVersion": 34,
-            "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0"
-          }
-        }
-      ]
-    ],
-    "scheme": "zenkoku-ai-taxi",
-    "experiments": {
-      "typedRoutes": false
+      "favicon": "./assets/favicon.png"
     },
     "extra": {
+      "backendUrl": "https://tokyo-taxi-ai-backend.railway.app",
+      "weatherApiKey": "bd17578f85cb46d681ca3e4f3bdc9963",
       "eas": {
         "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
-      },
-      "backendUrl": "https://tokyo-taxi-ai-production.up.railway.app",
-      "lineOAID": "@dhai52765howdah",
-      "openWeatherApiKey": "bd17578f85cb46d681ca3e4f3bdc9963",
-      "googleMapsApiKey": "AIzaSyD3s9ewOUj83nQkMHP8kcc8Obhe8tshi5E"
-    },
-    "updates": {
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 10000
-    },
-    "runtimeVersion": "3.0.0",
-    "privacy": "unlisted"
+      }
+    }
   }
 }
