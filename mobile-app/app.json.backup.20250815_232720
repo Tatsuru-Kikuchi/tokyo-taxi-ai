@@ -13,15 +13,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.zenkoku.aitaxi",
+      "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "配車サービスと運行管理のために位置情報を使用します",
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "config": {
-        "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
       }
     },
     "android": {
@@ -29,20 +25,15 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.zenkoku.aitaxi",
+      "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
-        }
-      }
+      ]
     },
     "extra": {
       "eas": {
-        "projectId": "cfa67fb7-4e8a-47ce-bda9-1ddad2bb3f11"
+        "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }
     }
   }
