@@ -16,117 +16,119 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             color: #333;
-            font-size: 18px;
+            font-size: 24px;
             line-height: 1.8;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
-            padding: 40px 30px;
+            padding: 60px 40px;
         }
         
         .main-content {
             background: white;
-            border-radius: 20px;
-            padding: 60px;
+            border-radius: 30px;
+            padding: 80px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.2);
         }
         
         h1 {
-            font-size: 48px;
+            font-size: 72px;
             font-weight: 700;
             background: linear-gradient(135deg, #667eea, #764ba2);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
             text-align: center;
         }
         
         .subtitle {
             text-align: center;
-            font-size: 22px;
+            font-size: 32px;
             color: #666;
-            margin-bottom: 50px;
+            margin-bottom: 60px;
         }
         
         h2 {
-            font-size: 32px;
+            font-size: 48px;
             color: #667eea;
-            margin-top: 50px;
-            margin-bottom: 25px;
-            padding-bottom: 10px;
-            border-bottom: 3px solid #667eea;
+            margin-top: 70px;
+            margin-bottom: 40px;
+            padding-bottom: 15px;
+            border-bottom: 4px solid #667eea;
         }
         
         h3 {
-            font-size: 24px;
+            font-size: 36px;
             color: #764ba2;
-            margin-top: 30px;
-            margin-bottom: 15px;
+            margin-top: 50px;
+            margin-bottom: 25px;
         }
         
         p {
-            font-size: 18px;
-            margin-bottom: 20px;
+            font-size: 24px;
+            margin-bottom: 30px;
             color: #444;
+            line-height: 1.8;
         }
         
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-            margin: 40px 0;
+            grid-template-columns: repeat(auto-fit, minmax(550px, 1fr));
+            gap: 40px;
+            margin: 60px 0;
         }
         
         .feature-card {
             background: #f8f9fa;
-            border-radius: 15px;
-            padding: 30px;
+            border-radius: 20px;
+            padding: 50px;
             transition: transform 0.3s, box-shadow 0.3s;
-            border: 2px solid transparent;
+            border: 3px solid transparent;
         }
         
         .feature-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.2);
             border-color: #667eea;
         }
         
         .feature-icon {
-            font-size: 40px;
-            margin-bottom: 15px;
+            font-size: 60px;
+            margin-bottom: 25px;
         }
         
         .feature-card h4 {
-            font-size: 22px;
+            font-size: 32px;
             color: #333;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
         
         .feature-card p {
-            font-size: 16px;
+            font-size: 22px;
             color: #666;
         }
         
         .guide-section {
             background: #f0f4ff;
-            border-radius: 15px;
-            padding: 40px;
-            margin: 40px 0;
+            border-radius: 20px;
+            padding: 60px;
+            margin: 60px 0;
         }
         
         .guide-steps {
             counter-reset: step;
-            margin: 30px 0;
+            margin: 40px 0;
         }
         
         .guide-step {
             counter-increment: step;
-            margin: 25px 0;
-            padding-left: 70px;
+            margin: 35px 0;
+            padding-left: 100px;
             position: relative;
-            font-size: 18px;
+            font-size: 24px;
+            line-height: 1.8;
         }
         
         .guide-step::before {
@@ -136,21 +138,27 @@
             top: 0;
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
-            width: 50px;
-            height: 50px;
+            width: 70px;
+            height: 70px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 20px;
+            font-size: 30px;
+        }
+        
+        .guide-step strong {
+            font-size: 26px;
+            display: block;
+            margin-bottom: 10px;
         }
         
         .contact-section {
             background: #fafafa;
-            border-radius: 15px;
-            padding: 40px;
-            margin: 40px 0;
+            border-radius: 20px;
+            padding: 60px;
+            margin: 60px 0;
             text-align: center;
         }
         
@@ -158,12 +166,12 @@
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
-            gap: 40px;
-            margin-top: 30px;
+            gap: 60px;
+            margin-top: 40px;
         }
         
         .contact-item {
-            font-size: 20px;
+            font-size: 26px;
         }
         
         .contact-item a {
@@ -177,20 +185,20 @@
         }
         
         .faq-section {
-            margin: 50px 0;
+            margin: 70px 0;
         }
         
         .faq-item {
             background: white;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            margin: 20px 0;
+            border: 3px solid #e0e0e0;
+            border-radius: 15px;
+            margin: 30px 0;
             overflow: hidden;
         }
         
         .faq-question {
-            padding: 25px;
-            font-size: 20px;
+            padding: 35px;
+            font-size: 26px;
             font-weight: 600;
             cursor: pointer;
             background: #f8f9fa;
@@ -202,8 +210,8 @@
         }
         
         .faq-answer {
-            padding: 25px;
-            font-size: 18px;
+            padding: 35px;
+            font-size: 24px;
             line-height: 1.8;
             display: none;
         }
@@ -214,24 +222,24 @@
         
         .footer {
             background: white;
-            border-radius: 15px;
-            padding: 40px;
-            margin-top: 50px;
+            border-radius: 20px;
+            padding: 60px;
+            margin-top: 70px;
             text-align: center;
         }
         
         .footer-links {
             display: flex;
             justify-content: center;
-            gap: 30px;
-            margin: 30px 0;
+            gap: 50px;
+            margin: 40px 0;
             flex-wrap: wrap;
         }
         
         .footer-links a {
             color: #667eea;
             text-decoration: none;
-            font-size: 18px;
+            font-size: 24px;
             font-weight: 500;
         }
         
@@ -241,37 +249,54 @@
         
         .button {
             display: inline-block;
-            padding: 15px 40px;
+            padding: 20px 60px;
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
             text-decoration: none;
-            border-radius: 50px;
-            font-size: 18px;
+            border-radius: 60px;
+            font-size: 24px;
             font-weight: 600;
             transition: transform 0.3s, box-shadow 0.3s;
-            margin: 10px;
+            margin: 15px;
         }
         
         .button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.3);
+        }
+        
+        ul {
+            padding-left: 40px;
+        }
+        
+        li {
+            font-size: 24px;
+            margin-bottom: 15px;
         }
         
         @media (max-width: 768px) {
             .container {
-                padding: 20px 15px;
-            }
-            
-            .main-content {
                 padding: 30px 20px;
             }
             
+            .main-content {
+                padding: 40px 25px;
+            }
+            
             h1 {
-                font-size: 32px;
+                font-size: 48px;
             }
             
             h2 {
-                font-size: 24px;
+                font-size: 36px;
+            }
+            
+            h3 {
+                font-size: 28px;
+            }
+            
+            p, li, .guide-step {
+                font-size: 20px;
             }
             
             .features-grid {
@@ -326,23 +351,23 @@
                 <h3>お客様向け</h3>
                 <div class="guide-steps">
                     <div class="guide-step">
-                        <strong>アプリを起動</strong><br>
+                        <strong>アプリを起動</strong>
                         全国AIタクシーアプリを開き、「お客様」モードを選択します
                     </div>
                     <div class="guide-step">
-                        <strong>位置情報を許可</strong><br>
+                        <strong>位置情報を許可</strong>
                         正確な配車のため、位置情報の使用を許可してください
                     </div>
                     <div class="guide-step">
-                        <strong>目的地を設定</strong><br>
+                        <strong>目的地を設定</strong>
                         地図上で目的地をタップ、または住所を入力します
                     </div>
                     <div class="guide-step">
-                        <strong>料金を確認して配車</strong><br>
+                        <strong>料金を確認して配車</strong>
                         AI予測による料金見積もりを確認し、配車をリクエスト
                     </div>
                     <div class="guide-step">
-                        <strong>快適な移動を</strong><br>
+                        <strong>快適な移動を</strong>
                         ドライバーの到着をお待ちください。LINE通知も利用可能です
                     </div>
                 </div>
@@ -350,23 +375,23 @@
                 <h3>ドライバー向け</h3>
                 <div class="guide-steps">
                     <div class="guide-step">
-                        <strong>ドライバーモードを選択</strong><br>
+                        <strong>ドライバーモードを選択</strong>
                         アプリ起動後、「ドライバー」モードを選択します
                     </div>
                     <div class="guide-step">
-                        <strong>オンラインに切り替え</strong><br>
+                        <strong>オンラインに切り替え</strong>
                         営業開始時は「オンライン」ボタンをタップ
                     </div>
                     <div class="guide-step">
-                        <strong>AI推奨エリアを確認</strong><br>
+                        <strong>AI推奨エリアを確認</strong>
                         需要予測マップで高需要エリアを確認できます
                     </div>
                     <div class="guide-step">
-                        <strong>リクエストを受諾</strong><br>
+                        <strong>リクエストを受諾</strong>
                         配車リクエストが来たら、詳細を確認して受諾
                     </div>
                     <div class="guide-step">
-                        <strong>収益を最大化</strong><br>
+                        <strong>収益を最大化</strong>
                         AI収益予測を活用して、効率的な営業を実現
                     </div>
                 </div>
@@ -417,16 +442,16 @@
             </div>
             
             <div class="footer">
-                <h3>全国AIタクシー</h3>
-                <p style="color: #666; margin: 20px 0; font-size: 18px;">革新的なAI技術で、移動をもっと便利に、もっと快適に</p>
+                <h3 style="font-size: 36px;">全国AIタクシー</h3>
+                <p style="color: #666; margin: 30px 0; font-size: 24px;">革新的なAI技術で、移動をもっと便利に、もっと快適に</p>
                 <div class="footer-links">
                     <a href="privacy.html">プライバシーポリシー</a>
                     <a href="terms.html">利用規約</a>
                     <a href="https://github.com/Tatsuru-Kikuchi/tokyo-taxi-ai" target="_blank">GitHub</a>
                     <a href="https://tokyo-taxi-ai-backend-production.up.railway.app/health" target="_blank">API Status</a>
                 </div>
-                <p style="margin-top: 30px; color: #999; font-size: 16px;">© 2025 Tatsuru Kikuchi. All rights reserved.</p>
-                <div style="margin-top: 30px;">
+                <p style="margin-top: 40px; color: #999; font-size: 20px;">© 2025 Tatsuru Kikuchi. All rights reserved.</p>
+                <div style="margin-top: 40px;">
                     <a href="#" class="button">App Store (審査中)</a>
                     <a href="#" class="button">Google Play (準備中)</a>
                 </div>
