@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
   // Configuration
-  const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+  const BACKEND_URL = 'https://tokyo-taxi-ai-backend-production.up.railway.app';
   const LINE_OA_ID = '@dhai52765howdah';
   const API_BASE_URL = BACKEND_URL;
 
@@ -42,34 +42,33 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Socket handling
-  const socketRef = useRef(null);
-  const [socketConnected, setSocketConnected] = useState(false);
-  const locationUpdateRef = useRef(null);
+  // Remove socket.io - causes production crashes
+  // Use polling for status updates instead
+  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const connectionCheckInterval = useRef(null);
+  const locationUpdateInterval = useRef(null);
 
   useEffect(() => {
     initializeDriver();
+    
+    // Set up periodic connection check
+    connectionCheckInterval.current = setInterval(() => {
+      checkBackendConnection();
+    }, 30000); // Check every 30 seconds
+    
     return () => {
       cleanup();
     };
   }, []);
 
   const cleanup = () => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.emit('driver_offline', { driverId: `driver_${Date.now()}` });
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setSocketConnected(false);
-      } catch (error) {
-        console.warn('Socket cleanup error:', error);
-      }
+    if (connectionCheckInterval.current) {
+      clearInterval(connectionCheckInterval.current);
     }
-
-    if (locationUpdateRef.current) {
-      clearInterval(locationUpdateRef.current);
-      locationUpdateRef.current = null;
+    if (locationUpdateInterval.current) {
+      clearInterval(locationUpdateInterval.current);
     }
   };
 
@@ -102,6 +101,9 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
       // Detect region and load data
       await detectRegion(currentLocation.coords.latitude, currentLocation.coords.longitude);
 
+      // Check backend connectivity
+      checkBackendConnection();
+
     } catch (error) {
       console.error('Driver initialization error:', error);
       setError(error.message);
@@ -112,6 +114,23 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
       setPrefecture('東京都');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkBackendConnection = async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      setConnectionStatus(response.ok ? 'connected' : 'offline');
+    } catch (error) {
+      setConnectionStatus('offline');
     }
   };
 
@@ -148,14 +167,19 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
 
   const detectRegion = async (lat, lon) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/stations/nearby-regional?lat=${lat}&lon=${lon}&radius=2`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
-          timeout: 5000,
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
@@ -174,8 +198,7 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
         // Load additional data
         await Promise.all([
           loadWeatherData(data.detectedRegion),
-          loadRecommendations(lat, lon),
-          initializeSocket()
+          loadRecommendations(lat, lon)
         ]);
       }
     } catch (error) {
@@ -198,10 +221,15 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
 
   const loadWeatherData = async (regionName) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/weather/forecast-regional?region=${regionName}`,
-        { timeout: 5000 }
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -216,10 +244,15 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
     if (!lat || !lon) return;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/recommendations/regional?lat=${lat}&lon=${lon}`,
-        { timeout: 5000 }
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -230,62 +263,29 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
     }
   };
 
-  // Safer socket initialization
-  const initializeSocket = async () => {
+  // Simulate ride request without socket
+  const checkForRideRequests = async () => {
+    if (!isOnline || !location) return;
+
     try {
-      const io = require('socket.io-client');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(
+        `${API_BASE_URL}/api/rides/pending?driverId=driver_${Date.now()}&lat=${location.latitude}&lon=${location.longitude}`,
+        { signal: controller.signal }
+      );
+      
+      clearTimeout(timeoutId);
 
-      if (socketRef.current) {
-        socketRef.current.disconnect();
+      if (response.ok) {
+        const data = await response.json();
+        if (data.rides && data.rides.length > 0) {
+          handleRideRequest(data.rides[0]);
+        }
       }
-
-      socketRef.current = io(API_BASE_URL, {
-        transports: ['websocket', 'polling'],
-        timeout: 5000,
-        forceNew: true,
-      });
-
-      socketRef.current.on('connect', () => {
-        console.log('Driver socket connected');
-        setSocketConnected(true);
-
-        // Register as driver if online
-        if (isOnline && location) {
-          socketRef.current.emit('driver_online', {
-            driverId: `driver_${Date.now()}`,
-            driverName: 'ドライバー',
-            location: location
-          });
-        }
-      });
-
-      socketRef.current.on('disconnect', () => {
-        console.log('Driver socket disconnected');
-        setSocketConnected(false);
-      });
-
-      socketRef.current.on('connect_error', (error) => {
-        console.warn('Driver socket error:', error);
-        setSocketConnected(false);
-      });
-
-      socketRef.current.on('ride_request', (rideData) => {
-        handleRideRequest(rideData);
-      });
-
-      // Connection timeout
-      setTimeout(() => {
-        if (!socketConnected) {
-          console.warn('Driver socket timeout');
-          if (socketRef.current) {
-            socketRef.current.disconnect();
-          }
-        }
-      }, 10000);
-
     } catch (error) {
-      console.warn('Driver socket initialization error:', error);
-      setSocketConnected(false);
+      console.warn('Check ride requests error:', error);
     }
   };
 
@@ -325,32 +325,30 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
       setIsOnline(newStatus);
       await saveToStorage('isDriverOnline', newStatus);
 
-      if (socketRef.current && socketRef.current.connected) {
-        if (newStatus && location) {
-          // Go online
-          socketRef.current.emit('driver_online', {
-            driverId: `driver_${Date.now()}`,
-            driverName: 'ドライバー',
-            location: location
-          });
-
-          // Start location updates
-          startLocationUpdates();
-        } else {
-          // Go offline
-          socketRef.current.emit('driver_offline', {
-            driverId: `driver_${Date.now()}`
-          });
-
-          // Stop location updates
-          stopLocationUpdates();
-        }
+      if (newStatus) {
+        // Go online - start checking for rides
+        startLocationUpdates();
+        Alert.alert('状態変更', 'オンラインになりました');
+      } else {
+        // Go offline - stop checking
+        stopLocationUpdates();
+        Alert.alert('状態変更', 'オフラインになりました');
       }
 
-      Alert.alert(
-        '状態変更',
-        newStatus ? 'オンラインになりました' : 'オフラインになりました'
-      );
+      // Notify backend of status change
+      try {
+        await fetch(`${API_BASE_URL}/api/drivers/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            driverId: `driver_${Date.now()}`,
+            status: newStatus ? 'online' : 'offline',
+            location: location
+          })
+        });
+      } catch (error) {
+        console.warn('Status update error:', error);
+      }
     } catch (error) {
       console.error('Toggle online error:', error);
       Alert.alert('エラー', '状態の変更に失敗しました');
@@ -358,34 +356,33 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
   };
 
   const startLocationUpdates = () => {
-    if (locationUpdateRef.current) {
-      clearInterval(locationUpdateRef.current);
+    if (locationUpdateInterval.current) {
+      clearInterval(locationUpdateInterval.current);
     }
 
-    locationUpdateRef.current = setInterval(async () => {
-      try {
-        if (isOnline && socketRef.current && socketRef.current.connected) {
+    // Check for rides every 10 seconds when online
+    locationUpdateInterval.current = setInterval(async () => {
+      if (isOnline) {
+        // Update location
+        try {
           const currentLocation = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-
           setLocation(currentLocation.coords);
-
-          socketRef.current.emit('location_update', {
-            driverId: `driver_${Date.now()}`,
-            location: currentLocation.coords
-          });
+        } catch (error) {
+          console.warn('Location update error:', error);
         }
-      } catch (error) {
-        console.warn('Location update error:', error);
+
+        // Check for new ride requests
+        checkForRideRequests();
       }
-    }, 30000); // Update every 30 seconds
+    }, 10000); // Every 10 seconds
   };
 
   const stopLocationUpdates = () => {
-    if (locationUpdateRef.current) {
-      clearInterval(locationUpdateRef.current);
-      locationUpdateRef.current = null;
+    if (locationUpdateInterval.current) {
+      clearInterval(locationUpdateInterval.current);
+      locationUpdateInterval.current = null;
     }
   };
 
@@ -503,10 +500,10 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
           <View style={styles.connectionStatus}>
             <View style={[
               styles.connectionDot,
-              { backgroundColor: socketConnected ? '#4CAF50' : '#ff6b6b' }
+              { backgroundColor: connectionStatus === 'connected' ? '#4CAF50' : '#ff6b6b' }
             ]} />
             <Text style={styles.connectionText}>
-              {socketConnected ? '接続済み' : 'オフライン'}
+              {connectionStatus === 'connected' ? '接続済み' : 'オフライン'}
             </Text>
           </View>
         </View>
@@ -544,27 +541,30 @@ const DriverScreen = ({ onSwitchMode, onBackToSelection }) => {
             <MapView
               style={styles.map}
               provider={PROVIDER_GOOGLE}
-              region={{
+              initialRegion={{
                 latitude: location.latitude,
                 longitude: location.longitude,
                 latitudeDelta: 0.02,
                 longitudeDelta: 0.02,
               }}
+              onMapReady={() => setMapReady(true)}
               showsUserLocation={true}
               showsMyLocationButton={true}
             >
               {/* Driver location */}
-              <Marker
-                coordinate={{
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                }}
-                title="あなたの位置"
-                pinColor={isOnline ? 'green' : 'gray'}
-              />
+              {mapReady && (
+                <Marker
+                  coordinate={{
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                  }}
+                  title="あなたの位置"
+                  pinColor={isOnline ? 'green' : 'gray'}
+                />
+              )}
 
               {/* High-demand stations */}
-              {nearbyStations.map((station, index) => (
+              {mapReady && nearbyStations.map((station, index) => (
                 <Marker
                   key={station.id || index}
                   coordinate={{
