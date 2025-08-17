@@ -11,25 +11,26 @@ import {
   ActivityIndicator,
   Linking
 } from 'react-native';
-import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
   // Configuration
-  const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+  const BACKEND_URL = 'https://tokyo-taxi-ai-backend-production.up.railway.app';
   const LINE_OA_ID = '@dhai52765howdah';
   const API_BASE_URL = BACKEND_URL;
-  const GOOGLE_MAPS_KEY = 'AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ';
 
-  // State
-  const [location, setLocation] = useState(null);
-  const [region, setRegion] = useState({
-    latitude: 35.6762,
-    longitude: 139.6503,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
+  // Fix: Provide default props to prevent undefined crash
+  const switchMode = onSwitchMode || (() => {
+    console.warn('onSwitchMode prop not provided');
   });
+  const backToSelection = onBackToSelection || (() => {
+    console.warn('onBackToSelection prop not provided');
+  });
+
+  const [location, setLocation] = useState(null);
+  const [region, setRegion] = useState('tokyo');
   const [prefecture, setPrefecture] = useState('東京都');
   const [nearbyStations, setNearbyStations] = useState([]);
   const [weather, setWeather] = useState(null);
@@ -37,12 +38,16 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
   const [availableDrivers, setAvailableDrivers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [demandZones, setDemandZones] = useState([]);
-  const [showHeatmap, setShowHeatmap] = useState(true);
-  const mapRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Remove socket.io - causes production crashes
+  const [connectionStatus, setConnectionStatus] = useState('checking');
 
   useEffect(() => {
     initializeApp();
+    return () => {
+      // Cleanup without socket
+    };
   }, []);
 
   const initializeApp = async () => {
@@ -50,13 +55,13 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
       setLoading(true);
       setError(null);
 
-      // Request location permissions
+      // Step 1: Request location permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         throw new Error('位置情報の許可が必要です');
       }
 
-      // Get current location
+      // Step 2: Get current location
       const currentLocation = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
         timeout: 10000,
@@ -66,58 +71,37 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         throw new Error('位置情報を取得できません');
       }
 
-      const { latitude, longitude } = currentLocation.coords;
       setLocation(currentLocation.coords);
-      setRegion({
-        latitude,
-        longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
 
-      // Generate demand zones based on location
-      generateDemandZones(latitude, longitude);
+      // Step 3: Detect region
+      await detectRegion(currentLocation.coords.latitude, currentLocation.coords.longitude);
 
-      // Load additional data
-      await Promise.all([
-        detectRegion(latitude, longitude),
-        loadWeatherData('tokyo'),
-        loadRecommendations(latitude, longitude),
-        loadAvailableDrivers('tokyo')
-      ]);
+      // Check backend connectivity
+      checkBackendConnection();
 
     } catch (error) {
       console.error('App initialization error:', error);
       setError(error.message);
-      
-      // Fallback to Tokyo
+
+      // Fallback to default location (Tokyo)
       setLocation({ latitude: 35.6762, longitude: 139.6503 });
-      generateDemandZones(35.6762, 139.6503);
+      setRegion('tokyo');
+      setPrefecture('東京都');
     } finally {
       setLoading(false);
     }
   };
 
-  const generateDemandZones = (lat, lon) => {
-    // Generate AI demand prediction zones
-    const zones = [];
-    const timeOfDay = new Date().getHours();
-    const isRushHour = (timeOfDay >= 7 && timeOfDay <= 9) || (timeOfDay >= 17 && timeOfDay <= 20);
-    
-    for (let i = 0; i < 8; i++) {
-      const angle = (i * 45) * Math.PI / 180;
-      const distance = 0.005 + Math.random() * 0.01;
-      const intensity = isRushHour ? 0.6 + Math.random() * 0.4 : 0.3 + Math.random() * 0.4;
-      
-      zones.push({
-        latitude: lat + distance * Math.sin(angle),
-        longitude: lon + distance * Math.cos(angle),
-        intensity,
-        radius: 300 + Math.random() * 200,
+  const checkBackendConnection = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        timeout: 3000,
       });
+      setConnectionStatus(response.ok ? 'connected' : 'offline');
+    } catch (error) {
+      setConnectionStatus('offline');
     }
-    
-    setDemandZones(zones);
   };
 
   const detectRegion = async (lat, lon) => {
@@ -130,17 +114,62 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         }
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.prefecture) {
-          setPrefecture(data.prefecture);
-        }
-        if (data.stations) {
-          setNearbyStations(data.stations);
-        }
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.detectedRegion && data.prefecture) {
+        setRegion(data.detectedRegion);
+        setPrefecture(data.prefecture);
+        setNearbyStations(data.stations || []);
+
+        // Save to AsyncStorage with error handling
+        await saveToStorage('userRegion', data.detectedRegion);
+        await saveToStorage('userPrefecture', data.prefecture);
+
+        // Load additional data for detected region
+        await Promise.all([
+          loadWeatherData(data.detectedRegion),
+          loadRecommendations(lat, lon),
+          loadAvailableDrivers(data.detectedRegion)
+        ]);
       }
     } catch (error) {
-      console.warn('Region detection error:', error);
+      console.error('Region detection error:', error);
+      await loadSavedRegion();
+    }
+  };
+
+  // Safe AsyncStorage operations
+  const saveToStorage = async (key, value) => {
+    try {
+      await AsyncStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      console.warn(`AsyncStorage save error for ${key}:`, error);
+    }
+  };
+
+  const loadFromStorage = async (key, defaultValue = null) => {
+    try {
+      const stored = await AsyncStorage.getItem(key);
+      return stored ? JSON.parse(stored) : defaultValue;
+    } catch (error) {
+      console.warn(`AsyncStorage load error for ${key}:`, error);
+      return defaultValue;
+    }
+  };
+
+  const loadSavedRegion = async () => {
+    try {
+      const savedRegion = await loadFromStorage('userRegion', 'tokyo');
+      const savedPrefecture = await loadFromStorage('userPrefecture', '東京都');
+
+      setRegion(savedRegion);
+      setPrefecture(savedPrefecture);
+    } catch (error) {
+      console.warn('Load saved region error:', error);
     }
   };
 
@@ -160,6 +189,8 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
   };
 
   const loadRecommendations = async (lat, lon) => {
+    if (!lat || !lon) return;
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/recommendations/regional?lat=${lat}&lon=${lon}`
@@ -195,45 +226,92 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
       return;
     }
 
+    try {
+      const rideData = {
+        customerId: `customer_${Date.now()}`,
+        customerName: 'お客様',
+        pickup: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          address: `${prefecture}内`
+        },
+        destination: nearbyStations[0] ? {
+          latitude: nearbyStations[0].lat,
+          longitude: nearbyStations[0].lon,
+          address: nearbyStations[0].name
+        } : null
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/rides/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rideData),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        Alert.alert(
+          '配車リクエスト送信完了',
+          `${result.availableDrivers || availableDrivers}名のドライバーに通知しました`
+        );
+      } else {
+        throw new Error('配車リクエストに失敗しました');
+      }
+    } catch (error) {
+      console.error('Ride request error:', error);
+      Alert.alert('エラー', '配車リクエストに失敗しました');
+    }
+  };
+
+  // LINE Integration Functions
+  const openLINESupport = async () => {
+    try {
+      const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+      const canOpen = await Linking.canOpenURL(lineURL);
+
+      if (canOpen) {
+        await Linking.openURL(lineURL);
+      } else {
+        // Fallback: open LINE web version
+        const webURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+        await Linking.openURL(webURL);
+      }
+    } catch (error) {
+      console.error('LINE open error:', error);
+      Alert.alert(
+        'エラー',
+        'LINEアプリを開けませんでした。\nLINE ID: ' + LINE_OA_ID + '\nで検索してください。',
+        [
+          { text: 'OK', style: 'default' },
+          {
+            text: 'LINE IDをコピー',
+            onPress: () => {
+              Alert.alert('LINE ID', LINE_OA_ID);
+            }
+          }
+        ]
+      );
+    }
+  };
+
+  const showSupportOptions = () => {
     Alert.alert(
-      '配車リクエスト',
-      '配車をリクエストしますか？',
+      'サポート・お問い合わせ',
+      'どちらの方法でサポートを受けますか？',
       [
         { text: 'キャンセル', style: 'cancel' },
+        { text: 'LINEサポート', onPress: openLINESupport },
         {
-          text: 'リクエスト',
-          onPress: () => {
-            Alert.alert('成功', '配車リクエストを送信しました');
-          }
+          text: 'メールサポート',
+          onPress: () => Linking.openURL('mailto:support@zenkoku-ai-taxi.jp?subject=お問い合わせ')
         }
       ]
     );
   };
 
-  const openLINESupport = async () => {
-    try {
-      const lineURL = `https://line.me/R/ti/p/${LINE_OA_ID}`;
-      await Linking.openURL(lineURL);
-    } catch (error) {
-      Alert.alert('エラー', 'LINEアプリを開けませんでした');
-    }
-  };
-
-  const centerOnLocation = () => {
-    if (location && mapRef.current) {
-      mapRef.current.animateToRegion({
-        latitude: location.latitude,
-        longitude: location.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      }, 1000);
-    }
-  };
-
-  const getDemandColor = (intensity) => {
-    if (intensity > 0.7) return 'rgba(255, 0, 0, 0.4)';
-    if (intensity > 0.4) return 'rgba(255, 165, 0, 0.3)';
-    return 'rgba(255, 255, 0, 0.2)';
+  const handleRetry = () => {
+    setError(null);
+    initializeApp();
   };
 
   if (loading) {
@@ -242,6 +320,7 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#667eea" />
           <Text style={styles.loadingText}>アプリを初期化中...</Text>
+          <Text style={styles.loadingSubtext}>位置情報と地域データを取得しています</Text>
         </View>
       </SafeAreaView>
     );
@@ -253,14 +332,15 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         <View style={styles.errorContainer}>
           <Text style={styles.errorTitle}>エラーが発生しました</Text>
           <Text style={styles.errorMessage}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={initializeApp}>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
             <Text style={styles.retryButtonText}>再試行</Text>
           </TouchableOpacity>
-          {onBackToSelection && (
-            <TouchableOpacity style={styles.backButton} onPress={onBackToSelection}>
-              <Text style={styles.backButtonText}>戻る</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.switchButton} onPress={switchMode}>
+            <Text style={styles.switchButtonText}>ドライバーモードに切り替え</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.supportButton} onPress={showSupportOptions}>
+            <Text style={styles.supportButtonText}>サポートに連絡</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -273,46 +353,47 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         <View style={styles.header}>
           <Text style={styles.title}>お客様</Text>
           <Text style={styles.prefecture}>{prefecture}</Text>
+          <View style={styles.connectionStatus}>
+            <View style={[
+              styles.connectionDot,
+              { backgroundColor: connectionStatus === 'connected' ? '#4CAF50' : '#ff6b6b' }
+            ]} />
+            <Text style={styles.connectionText}>
+              {connectionStatus === 'connected' ? '接続済み' : 'オフライン'}
+            </Text>
+          </View>
         </View>
 
         {/* Map */}
         {location && (
           <View style={styles.mapContainer}>
             <MapView
-              ref={mapRef}
               style={styles.map}
               provider={PROVIDER_GOOGLE}
-              region={region}
+              initialRegion={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              onMapReady={() => setMapReady(true)}
               showsUserLocation={true}
-              showsMyLocationButton={false}
-              showsTraffic={true}
+              showsMyLocationButton={true}
             >
               {/* Current location marker */}
-              <Marker
-                coordinate={{
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                }}
-                title="現在地"
-                pinColor="blue"
-              />
-
-              {/* Demand zones */}
-              {showHeatmap && demandZones.map((zone, index) => (
-                <Circle
-                  key={index}
-                  center={{
-                    latitude: zone.latitude,
-                    longitude: zone.longitude,
+              {mapReady && (
+                <Marker
+                  coordinate={{
+                    latitude: location.latitude,
+                    longitude: location.longitude,
                   }}
-                  radius={zone.radius}
-                  fillColor={getDemandColor(zone.intensity)}
-                  strokeColor="transparent"
+                  title="現在地"
+                  pinColor="blue"
                 />
-              ))}
+              )}
 
               {/* Station markers */}
-              {nearbyStations.map((station, index) => (
+              {mapReady && nearbyStations.map((station, index) => (
                 <Marker
                   key={station.id || index}
                   coordinate={{
@@ -320,42 +401,11 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
                     longitude: station.lon,
                   }}
                   title={station.name}
-                  pinColor="orange"
+                  description={station.description || ''}
+                  pinColor="red"
                 />
               ))}
             </MapView>
-
-            {/* Map Controls */}
-            <View style={styles.mapControls}>
-              <TouchableOpacity style={styles.mapButton} onPress={centerOnLocation}>
-                <Text style={styles.mapButtonText}>📍</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.mapButton, showHeatmap && styles.mapButtonActive]} 
-                onPress={() => setShowHeatmap(!showHeatmap)}
-              >
-                <Text style={styles.mapButtonText}>🔥</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Demand Legend */}
-            {showHeatmap && (
-              <View style={styles.legend}>
-                <Text style={styles.legendTitle}>需要予測</Text>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendColor, { backgroundColor: 'rgba(255, 0, 0, 0.4)' }]} />
-                  <Text style={styles.legendText}>高</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendColor, { backgroundColor: 'rgba(255, 165, 0, 0.3)' }]} />
-                  <Text style={styles.legendText}>中</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendColor, { backgroundColor: 'rgba(255, 255, 0, 0.2)' }]} />
-                  <Text style={styles.legendText}>低</Text>
-                </View>
-              </View>
-            )}
           </View>
         )}
 
@@ -364,7 +414,7 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
           <View style={styles.weatherContainer}>
             <Text style={styles.weatherTitle}>天気情報</Text>
             <Text style={styles.weatherInfo}>
-              {weather.current?.description || '情報取得中'} | 
+              {weather.current?.description || '情報取得中'} |
               気温: {weather.current?.temperature || '--'}°C
             </Text>
           </View>
@@ -373,9 +423,21 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         {/* Available Drivers */}
         <View style={styles.driversContainer}>
           <Text style={styles.driversText}>
-            {availableDrivers}名のドライバーが待機中
+            {region}で{availableDrivers}名のドライバーが待機中
           </Text>
         </View>
+
+        {/* AI Recommendations */}
+        {recommendations.length > 0 && (
+          <View style={styles.recommendationsContainer}>
+            <Text style={styles.recommendationsTitle}>AI推奨情報</Text>
+            {recommendations.slice(0, 2).map((rec, index) => (
+              <View key={index} style={styles.recommendationItem}>
+                <Text style={styles.recommendationText}>{rec.message}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Action Buttons */}
         <View style={styles.buttonContainer}>
@@ -387,17 +449,24 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
             <Text style={styles.lineButtonText}>💬 LINEサポート</Text>
           </TouchableOpacity>
 
-          {onSwitchMode && (
-            <TouchableOpacity style={styles.switchButton} onPress={onSwitchMode}>
-              <Text style={styles.switchButtonText}>ドライバーモードに切り替え</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.switchButton} onPress={switchMode}>
+            <Text style={styles.switchButtonText}>ドライバーモードに切り替え</Text>
+          </TouchableOpacity>
 
-          {onBackToSelection && (
-            <TouchableOpacity style={styles.backButton} onPress={onBackToSelection}>
-              <Text style={styles.backButtonText}>モード選択に戻る</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.backButton} onPress={backToSelection}>
+            <Text style={styles.backButtonText}>モード選択に戻る</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Coverage Info */}
+        <View style={styles.coverageContainer}>
+          <Text style={styles.coverageText}>全国47都道府県対応予定</Text>
+          <Text style={styles.coverageSubtext}>
+            現在対応: 東京・名古屋・大阪・京都・福岡・札幌・仙台・広島
+          </Text>
+          <TouchableOpacity style={styles.supportLinkButton} onPress={showSupportOptions}>
+            <Text style={styles.supportLinkText}>サポート・お問い合わせ</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -423,6 +492,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 20,
     color: '#333',
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 10,
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,
@@ -454,6 +529,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  supportButton: {
+    backgroundColor: '#00C300',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginTop: 10,
+  },
+  supportButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
   header: {
     backgroundColor: '#667eea',
     padding: 20,
@@ -470,73 +557,29 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     marginTop: 5,
   },
+  connectionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  connectionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  connectionText: {
+    color: 'white',
+    fontSize: 12,
+  },
   mapContainer: {
-    height: 400,
+    height: 300,
     margin: 15,
     borderRadius: 15,
     overflow: 'hidden',
-    position: 'relative',
   },
   map: {
     flex: 1,
-  },
-  mapControls: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    gap: 10,
-  },
-  mapButton: {
-    backgroundColor: 'white',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  mapButtonActive: {
-    backgroundColor: '#667eea',
-  },
-  mapButtonText: {
-    fontSize: 20,
-  },
-  legend: {
-    position: 'absolute',
-    left: 10,
-    bottom: 10,
-    backgroundColor: 'white',
-    padding: 10,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  legendTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 3,
-  },
-  legendColor: {
-    width: 20,
-    height: 10,
-    marginRight: 5,
-    borderRadius: 2,
-  },
-  legendText: {
-    fontSize: 11,
   },
   weatherContainer: {
     backgroundColor: 'white',
@@ -570,6 +613,33 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     textAlign: 'center',
+  },
+  recommendationsContainer: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 15,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  recommendationsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333',
+  },
+  recommendationItem: {
+    backgroundColor: '#f0f8ff',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  recommendationText: {
+    fontSize: 14,
+    color: '#555',
   },
   buttonContainer: {
     margin: 15,
@@ -619,6 +689,35 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: '#666',
     fontSize: 14,
+    fontWeight: 'bold',
+  },
+  coverageContainer: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  coverageText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#667eea',
+  },
+  coverageSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 5,
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  supportLinkButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderColor: '#00C300',
+    borderWidth: 1,
+    borderRadius: 20,
+  },
+  supportLinkText: {
+    color: '#00C300',
+    fontSize: 12,
     fontWeight: 'bold',
   },
 });
