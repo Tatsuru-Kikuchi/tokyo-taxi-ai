@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
   // Configuration
-  const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+  const BACKEND_URL = 'https://tokyo-taxi-ai-backend-production.up.railway.app';
   const LINE_OA_ID = '@dhai52765howdah';
   const API_BASE_URL = BACKEND_URL;
 
@@ -38,29 +38,27 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
   const [availableDrivers, setAvailableDrivers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Socket handling
-  const socketRef = useRef(null);
-  const [socketConnected, setSocketConnected] = useState(false);
+  // Remove socket.io - causes production crashes
+  // Use polling for connection status instead
+  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const connectionCheckInterval = useRef(null);
 
   useEffect(() => {
     initializeApp();
+    
+    // Set up periodic connection check
+    connectionCheckInterval.current = setInterval(() => {
+      checkBackendConnection();
+    }, 30000); // Check every 30 seconds
+    
     return () => {
-      cleanup();
+      if (connectionCheckInterval.current) {
+        clearInterval(connectionCheckInterval.current);
+      }
     };
   }, []);
-
-  const cleanup = () => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setSocketConnected(false);
-      } catch (error) {
-        console.warn('Socket cleanup error:', error);
-      }
-    }
-  };
 
   const initializeApp = async () => {
     try {
@@ -88,6 +86,9 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
       // Step 3: Detect region
       await detectRegion(currentLocation.coords.latitude, currentLocation.coords.longitude);
 
+      // Check backend connectivity
+      checkBackendConnection();
+
     } catch (error) {
       console.error('App initialization error:', error);
       setError(error.message);
@@ -101,16 +102,38 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
     }
   };
 
+  const checkBackendConnection = async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      setConnectionStatus(response.ok ? 'connected' : 'offline');
+    } catch (error) {
+      setConnectionStatus('offline');
+    }
+  };
+
   const detectRegion = async (lat, lon) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/stations/nearby-regional?lat=${lat}&lon=${lon}&radius=2`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
-          timeout: 5000,
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
@@ -131,8 +154,7 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         await Promise.all([
           loadWeatherData(data.detectedRegion),
           loadRecommendations(lat, lon),
-          loadAvailableDrivers(data.detectedRegion),
-          initializeSocket()
+          loadAvailableDrivers(data.detectedRegion)
         ]);
       }
     } catch (error) {
@@ -174,10 +196,15 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
 
   const loadWeatherData = async (regionName) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/weather/forecast-regional?region=${regionName}`,
-        { timeout: 5000 }
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -192,10 +219,15 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
     if (!lat || !lon) return;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/recommendations/regional?lat=${lat}&lon=${lon}`,
-        { timeout: 5000 }
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -208,10 +240,15 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
 
   const loadAvailableDrivers = async (regionName) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(
         `${API_BASE_URL}/api/drivers/online?region=${regionName}`,
-        { timeout: 5000 }
+        { signal: controller.signal }
       );
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -219,52 +256,6 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
       }
     } catch (error) {
       console.warn('Available drivers error:', error);
-    }
-  };
-
-  // Safer socket initialization
-  const initializeSocket = async () => {
-    try {
-      const io = require('socket.io-client');
-
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-
-      socketRef.current = io(API_BASE_URL, {
-        transports: ['websocket', 'polling'],
-        timeout: 5000,
-        forceNew: true,
-      });
-
-      socketRef.current.on('connect', () => {
-        console.log('Socket connected');
-        setSocketConnected(true);
-      });
-
-      socketRef.current.on('disconnect', () => {
-        console.log('Socket disconnected');
-        setSocketConnected(false);
-      });
-
-      socketRef.current.on('connect_error', (error) => {
-        console.warn('Socket connection error:', error);
-        setSocketConnected(false);
-      });
-
-      // Set connection timeout
-      setTimeout(() => {
-        if (!socketConnected) {
-          console.warn('Socket connection timeout');
-          if (socketRef.current) {
-            socketRef.current.disconnect();
-          }
-        }
-      }, 10000);
-
-    } catch (error) {
-      console.warn('Socket initialization error:', error);
-      setSocketConnected(false);
     }
   };
 
@@ -290,18 +281,23 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
         } : null
       };
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
       const response = await fetch(`${API_BASE_URL}/api/rides/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rideData),
-        timeout: 10000,
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const result = await response.json();
         Alert.alert(
           '配車リクエスト送信完了',
-          `${result.availableDrivers}名のドライバーに通知しました`
+          `${result.availableDrivers || availableDrivers}名のドライバーに通知しました`
         );
       } else {
         throw new Error('配車リクエストに失敗しました');
@@ -335,7 +331,6 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
           {
             text: 'LINE IDをコピー',
             onPress: () => {
-              // In a real app, you might use Clipboard API here
               Alert.alert('LINE ID', LINE_OA_ID);
             }
           }
@@ -406,10 +401,10 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
           <View style={styles.connectionStatus}>
             <View style={[
               styles.connectionDot,
-              { backgroundColor: socketConnected ? '#4CAF50' : '#ff6b6b' }
+              { backgroundColor: connectionStatus === 'connected' ? '#4CAF50' : '#ff6b6b' }
             ]} />
             <Text style={styles.connectionText}>
-              {socketConnected ? '接続済み' : 'オフライン'}
+              {connectionStatus === 'connected' ? '接続済み' : 'オフライン'}
             </Text>
           </View>
         </View>
@@ -420,27 +415,30 @@ const CustomerScreen = ({ onSwitchMode, onBackToSelection }) => {
             <MapView
               style={styles.map}
               provider={PROVIDER_GOOGLE}
-              region={{
+              initialRegion={{
                 latitude: location.latitude,
                 longitude: location.longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
               }}
+              onMapReady={() => setMapReady(true)}
               showsUserLocation={true}
               showsMyLocationButton={true}
             >
               {/* Current location marker */}
-              <Marker
-                coordinate={{
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                }}
-                title="現在地"
-                pinColor="blue"
-              />
+              {mapReady && (
+                <Marker
+                  coordinate={{
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                  }}
+                  title="現在地"
+                  pinColor="blue"
+                />
+              )}
 
               {/* Station markers */}
-              {nearbyStations.map((station, index) => (
+              {mapReady && nearbyStations.map((station, index) => (
                 <Marker
                   key={station.id || index}
                   coordinate={{
