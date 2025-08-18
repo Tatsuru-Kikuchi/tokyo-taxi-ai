@@ -264,7 +264,7 @@ export default function App() {
           <Text style={styles.logo}>🚕</Text>
           <Text style={styles.mainTitle}>全国AIタクシー</Text>
           <Text style={styles.mainSubtitle}>AI技術で革新する配車サービス</Text>
-          <Text style={styles.version}>Version 3.0.0 (Build 65)</Text>
+          <Text style={styles.version}>Version 3.0.0 (Build 68)</Text>
           {screenLoadError && (
             <Text style={styles.warningText}>
               ⚠️ 簡易モードで実行中
@@ -353,13 +353,17 @@ const styles = StyleSheet.create({
   mainTitle: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#667eea',  // Changed to purple for better visibility
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   mainSubtitle: {
     fontSize: 16,
-    color: '#666',
+    color: '#764ba2',  // Changed to darker purple for better visibility
     marginBottom: 5,
+    fontWeight: '500',
   },
   title: {
     fontSize: 24,
@@ -372,9 +376,10 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   version: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: 13,
+    color: '#667eea',  // Changed to purple for better visibility
     fontStyle: 'italic',
+    fontWeight: '500',
   },
   warningText: {
     fontSize: 12,
@@ -434,9 +439,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusLabel: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: '#444',  // Darker color for better visibility
     marginRight: 5,
+    fontWeight: '600',
   },
   statusValue: {
     fontSize: 13,
