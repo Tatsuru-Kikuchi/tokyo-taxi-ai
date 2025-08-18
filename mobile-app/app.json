@@ -14,11 +14,13 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "68",
+      "buildNumber": "70",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["line"],
+        "GMSApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
       },
       "config": {
         "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
@@ -30,7 +32,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.zenkoku.aitaxi",
-      "versionCode": 68,
+      "versionCode": 70,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
@@ -41,10 +43,23 @@
         }
       }
     },
+    "plugins": [
+      [
+        "./plugins/withGoogleMaps",
+        {
+          "apiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "配車サービスのために位置情報を使用します"
+        }
+      ]
+    ],
     "extra": {
-      "eas": {
-        "projectId": "cfa67fb7-4e8a-47ce-bda9-1ddad2bb3f11"
-      }
+      "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ",
+      "backendUrl": "https://tokyo-taxi-ai-backend-production.up.railway.app"
     }
   }
 }
