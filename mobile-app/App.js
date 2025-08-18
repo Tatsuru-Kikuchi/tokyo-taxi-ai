@@ -264,7 +264,7 @@ export default function App() {
           <Text style={styles.logo}>🚕</Text>
           <Text style={styles.mainTitle}>全国AIタクシー</Text>
           <Text style={styles.mainSubtitle}>AI技術で革新する配車サービス</Text>
-          <Text style={styles.version}>Version 3.0.0 (Build 68)</Text>
+          <Text style={styles.version}>Version 3.0.0 (Build 69)</Text>
           {screenLoadError && (
             <Text style={styles.warningText}>
               ⚠️ 簡易モードで実行中
