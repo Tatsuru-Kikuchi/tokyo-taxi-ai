@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>配車サービスのために位置情報を使用します</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>バックグラウンドでも配車状況を更新します</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+    <key>GMSApiKey</key>
+    <string>AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
