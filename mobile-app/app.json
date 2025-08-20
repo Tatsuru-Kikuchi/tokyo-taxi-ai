@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "zenkokuaitaxi",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -14,10 +15,18 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
+      "buildNumber": "87",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "配車サービスと運行管理のために位置情報を使用します",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "最適な配車サービスを提供するために位置情報を使用します",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "line"
+        ],
         "ITSAppUsesNonExemptEncryption": false
       },
       "config": {
@@ -30,9 +39,11 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.zenkoku.aitaxi",
+      "versionCode": 86,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
       ],
       "config": {
         "googleMaps": {
@@ -40,10 +51,22 @@
         }
       }
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "配車サービスの品質向上のため、位置情報を使用します。"
+        }
+      ]
+    ],
     "extra": {
+      "backendUrl": "https://tokyo-taxi-ai-backend-production.up.railway.app",
+      "lineChannelId": "2007928791",
+      "lineOAId": "@dhai52765howdah",
       "eas": {
-        "projectId": "cfa67fb7-4e8a-47ce-bda9-1ddad2bb3f11"
+        "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }
-    }
+    },
+    "owner": "tatsuru-kikuchi"
   }
 }
