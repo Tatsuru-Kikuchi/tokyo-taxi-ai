@@ -1,4 +1,9 @@
 {
+  "_VERSION_INFO": {
+    "build": 86,
+    "status": "TestFlight Approved",
+    "notes": "This exact config works - DO NOT change slug or bundleIdentifier"
+  },
   "expo": {
     "name": "全国AIタクシー",
     "slug": "tokyo-taxi-ai",
@@ -15,7 +20,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "88",
+      "buildNumber": "86",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
@@ -28,9 +33,6 @@
           "line"
         ],
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "config": {
-        "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
       }
     },
     "android": {
@@ -44,12 +46,7 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION"
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
-        }
-      }
+      ]
     },
     "plugins": [
       [
