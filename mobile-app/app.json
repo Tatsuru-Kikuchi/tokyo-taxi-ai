@@ -2,21 +2,21 @@
   "expo": {
     "name": "全国AIタクシー",
     "slug": "tokyo-taxi-ai",
-    "version": "3.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "version": "3.0.1",
+    "orientation": "default",
+    "icon": "./assets/icons/ios/icon-1024.png",
     "userInterfaceStyle": "light",
     "scheme": "zenkokuaitaxi",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#667eea"
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-<<<<<<< HEAD
-      "buildNumber": "88",
+      "buildNumber": "106",
+      "icon": "./assets/icons/ios/icon-1024.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
@@ -28,46 +28,39 @@
         "LSApplicationQueriesSchemes": [
           "line"
         ],
-        "ITSAppUsesNonExemptEncryption": false
-=======
-      "buildNumber": "70",
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
-        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["line"],
-        "GMSApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
->>>>>>> origin/main
+        "UIRequiresFullScreen": false,
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
       },
+      "requireFullScreen": false,
       "config": {
-        "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#667eea"
       },
       "package": "com.zenkoku.aitaxi",
-<<<<<<< HEAD
-      "versionCode": 86,
+      "versionCode": 103,
+      "icon": "./assets/icons/ios/icon-1024.png",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION"
-=======
-      "versionCode": 70,
-      "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
->>>>>>> origin/main
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
-        }
-<<<<<<< HEAD
-      }
+      ]
     },
     "plugins": [
       [
@@ -85,28 +78,12 @@
         "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }
     },
-    "owner": "tatsuru-kikuchi"
-=======
-      }
+    "owner": "tatsuru-kikuchi",
+    "updates": {
+      "fallbackToCacheTimeout": 0
     },
-    "plugins": [
-      [
-        "./plugins/withGoogleMaps",
-        {
-          "apiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
-        }
-      ],
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "配車サービスのために位置情報を使用します"
-        }
-      ]
-    ],
-    "extra": {
-      "googleMapsApiKey": "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ",
-      "backendUrl": "https://tokyo-taxi-ai-backend-production.up.railway.app"
-    }
->>>>>>> origin/main
+    "assetBundlePatterns": [
+      "**/*"
+    ]
   }
 }
