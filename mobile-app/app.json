@@ -14,8 +14,9 @@
     },
     "ios": {
       "supportsTablet": true,
+      "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "106",
+      "buildNumber": "108",
       "icon": "./assets/icons/ios/icon-1024.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
@@ -27,9 +28,7 @@
         "UIRequiresFullScreen": false,
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait",
-          "UIInterfaceOrientationPortraitUpsideDown",
-          "UIInterfaceOrientationLandscapeLeft",
-          "UIInterfaceOrientationLandscapeRight"
+          "UIInterfaceOrientationPortraitUpsideDown"
         ],
         "UISupportedInterfaceOrientations~ipad": [
           "UIInterfaceOrientationPortrait",
@@ -37,10 +36,6 @@
           "UIInterfaceOrientationLandscapeLeft",
           "UIInterfaceOrientationLandscapeRight"
         ]
-      },
-      "requireFullScreen": false,
-      "config": {
-        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -49,7 +44,7 @@
         "backgroundColor": "#667eea"
       },
       "package": "com.zenkoku.aitaxi",
-      "versionCode": 106,
+      "versionCode": 108,
       "icon": "./assets/icons/ios/icon-1024.png",
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -73,12 +68,6 @@
         "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }
     },
-    "owner": "tatsuru-kikuchi",
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
-    "assetBundlePatterns": [
-      "**/*"
-    ]
+    "owner": "tatsuru-kikuchi"
   }
 }

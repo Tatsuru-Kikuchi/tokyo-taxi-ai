@@ -129,7 +129,7 @@ export default function App() {
             位置情報: {locationPermission ? '✅ 許可済み' : '❌ 未許可'}
           </Text>
           <Text style={[styles.versionText, isTablet && styles.versionTextTablet]}>
-            Version 3.0.1 (Build 103)
+            Version 3.0.1 (Build 108)
           </Text>
         </View>
       </View>
