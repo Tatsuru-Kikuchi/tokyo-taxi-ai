@@ -16,13 +16,18 @@
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "108",
+      "buildNumber": "112",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "最適な配車サービスを提供するために位置情報を使用します",
-        "UIBackgroundModes": ["location", "fetch"],
-        "LSApplicationQueriesSchemes": ["line"],
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "line"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
         "UIRequiresFullScreen": false,
         "UISupportedInterfaceOrientations": [
