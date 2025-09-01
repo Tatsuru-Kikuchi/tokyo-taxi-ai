@@ -4,7 +4,7 @@
     "slug": "tokyo-taxi-ai",
     "version": "3.0.1",
     "orientation": "default",
-    "icon": "./assets/icons/ios/icon-1024.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "zenkokuaitaxi",
     "splash": {
@@ -17,7 +17,6 @@
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
       "buildNumber": "108",
-      "icon": "./assets/icons/ios/icon-1024.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
@@ -45,7 +44,6 @@
       },
       "package": "com.zenkoku.aitaxi",
       "versionCode": 108,
-      "icon": "./assets/icons/ios/icon-1024.png",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
