@@ -1007,3 +1007,61 @@ async function initializeServer() {
 initializeServer();
 
 module.exports = app;
+
+// Train API endpoints (embedded directly)
+app.get('/api/trains/schedule', async (req, res) => {
+  const { station } = req.query;
+  const now = new Date();
+  const hour = now.getHours();
+  const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20);
+  
+  const trains = [
+    {
+      trainId: 'JR_YAMANOTE_' + Date.now() + '_1',
+      lineName: '山手線',
+      lineColor: '#9ACD32',
+      destination: '品川・渋谷方面',
+      platform: '2番線',
+      arrivalMinutes: 3,
+      status: 'on_time',
+      crowdLevel: isRushHour ? 'high' : 'medium'
+    },
+    {
+      trainId: 'JR_CHUO_' + Date.now() + '_2',
+      lineName: '中央線',
+      lineColor: '#FFA500',
+      destination: '新宿方面',
+      platform: '7番線',
+      arrivalMinutes: 5,
+      status: isRushHour ? 'delayed' : 'on_time',
+      delayMinutes: isRushHour ? 3 : 0
+    },
+    {
+      trainId: 'JR_KEIHIN_' + Date.now() + '_3',
+      lineName: '京浜東北線',
+      lineColor: '#00BFFF',
+      destination: '大宮方面',
+      platform: '3番線',
+      arrivalMinutes: 7,
+      status: 'on_time'
+    }
+  ];
+  
+  res.json({
+    station: station || 'tokyo',
+    trains: trains,
+    timestamp: now.toISOString()
+  });
+});
+
+app.post('/api/trains/delays', async (req, res) => {
+  const { stationId, lineId } = req.body;
+  const hasDelay = Math.random() > 0.7;
+  res.json({
+    hasDelay,
+    delayMinutes: hasDelay ? Math.floor(Math.random() * 10) + 5 : 0,
+    reason: hasDelay ? '混雑のため' : null,
+    affectedLines: hasDelay ? [lineId] : [],
+    recommendation: hasDelay ? 'タクシー利用をお勧めします' : null
+  });
+});
