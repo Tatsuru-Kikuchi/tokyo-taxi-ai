@@ -1,4 +1,6 @@
 const express = require('express');
+const odptService = require("./odpt-service");
+
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const http = require('http');
@@ -1001,6 +1003,32 @@ async function initializeServer() {
     console.error('❌ Failed to initialize server:', error);
     logToExternalService('server_init_error', error);
     process.exit(1);
+
+// ODPT Real-time Transport Data
+app.get("/api/trains/realtime", async (req, res) => {
+  const { station } = req.query;
+  const trains = await odptService.getTrainSchedule(station);
+  res.json({ source: "ODPT", station: station || "all", trains, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/trains/timetable", async (req, res) => {
+  const { stationId } = req.query;
+  const timetable = await odptService.getStationTimetable(stationId || "odpt.Station:JR-East.Yamanote.Tokyo");
+  res.json({ source: "ODPT", stationId, timetable, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/bus/realtime", async (req, res) => {
+  const { stop } = req.query;
+  const buses = await odptService.getBusSchedule(stop);
+  res.json({ source: "ODPT", stop: stop || "all", buses, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/trains/congestion", async (req, res) => {
+  const { trainId } = req.query;
+  const congestion = await odptService.getTrainCongestion(trainId);
+  res.json({ source: "ODPT", trainId, congestion, timestamp: new Date().toISOString() });
+});
+
   }
 }
 
