@@ -702,14 +702,14 @@ async function sendSupportNotification(ticket) {
 // ========================================
 // API ROUTES
 // ========================================
-// Train API routes
-const trainRoutes = require("./routes/trains");
-app.use("/api/trains", trainRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
+// Train API routes
+
 
   res.json({
+// Train API routes
 
     status: 'healthy',
     timestamp: new Date().toISOString(),
