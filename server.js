@@ -1004,6 +1004,20 @@ async function initializeServer() {
   }
 }
 
+
+// ODPT Real-time Transport Data
+const odptService = require("./odpt-service");
+
+app.get("/api/trains/realtime", async (req, res) => {
+  const trains = await odptService.getTrainSchedule(req.query.station);
+  res.json({ source: "ODPT", trains, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/bus/realtime", async (req, res) => {
+  const buses = await odptService.getBusSchedule(req.query.stop);
+  res.json({ source: "ODPT", buses, timestamp: new Date().toISOString() });
+});
+
 initializeServer();
 
 module.exports = app;
