@@ -1,6 +1,5 @@
 const express = require('express');
-const odptService = require("./odpt-service");
-
+const odptService = require('odpt-service');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const http = require('http');

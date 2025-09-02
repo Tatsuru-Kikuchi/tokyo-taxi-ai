@@ -663,7 +663,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date(),
-    version: '3.0.0',
+    version: '3.0.1',
     drivers: drivers.size,
     activeRides: rides.size,
     apis: {
