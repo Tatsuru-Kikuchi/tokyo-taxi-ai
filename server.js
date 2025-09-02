@@ -1,4 +1,6 @@
 const express = require('express');
+const cors = require('cors');
+const { WebSocketServer } = require('ws');
 const http = require('http');
 const admin = require('firebase-admin');
 
@@ -703,14 +705,12 @@ async function sendSupportNotification(ticket) {
 // API ROUTES
 // ========================================
 // Train API routes
-const trainRoutes = require("./routes/trains");
-app.use("/api/trains", trainRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
 
-  res.json({
 
+  res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     coverage: 'nationwide',
@@ -722,6 +722,11 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+
+// Train API routes
+const trainRoutes = require("./routes/trains");
+app.use("/api/trains", trainRoutes);
 
 // Get support configuration (for mobile app)
 app.get('/api/support/config', (req, res) => {
