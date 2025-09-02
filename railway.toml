@@ -2,8 +2,8 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "node server-complete.js"
-restartPolicyType = "ON_FAILURE"
+startCommand = "npm start"
+restartPolicyType = "on-failure"
 restartPolicyMaxRetries = 10
 
 [variables]
