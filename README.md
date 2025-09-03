@@ -77,7 +77,7 @@ npm run dev
 \```
 
 ## 4. Updated package.json
-```json
+\```json
 {
   "name": "zenkoku-ai-taxi-backend",
   "version": "3.0.1",
@@ -115,6 +115,7 @@ npm run dev
     "url": "https://github.com/tatsuru-kikuchi/tokyo-taxi-ai"
   }
 }
+\```
 =======
 # 🚕 全国AIタクシー (Nationwide AI Taxi)
 
