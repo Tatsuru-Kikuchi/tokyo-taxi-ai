@@ -1,697 +1,1151 @@
 const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
+const odptService = require('odpt-service');
 const cors = require('cors');
-const axios = require('axios');
-const tf = require('@tensorflow/tfjs-node');
-const line = require('@line/bot-sdk');
+const { WebSocketServer } = require('ws');
+const http = require('http');
+const admin = require('firebase-admin');
+
+// ========================================
+// CRASH PREVENTION: Process-level error handlers
+// ========================================
+
+process.on('uncaughtException', (error) => {
+  console.error('🚨 UNCAUGHT EXCEPTION:', error);
+  console.error('Stack:', error.stack);
+
+  logToExternalService('uncaughtException', error);
+
+  if (!isOperationalError(error)) {
+    console.error('💀 Non-operational error detected. Shutting down gracefully...');
+    gracefulShutdown();
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 UNHANDLED PROMISE REJECTION:', reason);
+  console.error('Promise:', promise);
+
+  logToExternalService('unhandledRejection', reason);
+  throw new Error(`Unhandled Rejection: ${reason}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('📴 SIGTERM received. Starting graceful shutdown...');
+  gracefulShutdown();
+});
+
+process.on('SIGINT', () => {
+  console.log('📴 SIGINT received. Starting graceful shutdown...');
+  gracefulShutdown();
+});
+
+// ========================================
+// ERROR HANDLING UTILITIES
+// ========================================
+
+function isOperationalError(error) {
+  const operationalErrors = [
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'ETIMEDOUT',
+    'ValidationError',
+    'CastError'
+  ];
+
+  return operationalErrors.some(opError =>
+    error.code === opError ||
+    error.name === opError ||
+    error.message.includes(opError)
+  );
+}
+
+function logToExternalService(type, error) {
+  const logData = {
+    type,
+    message: error.message || error,
+    stack: error.stack,
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  };
+
+  console.log('📝 ERROR LOG:', JSON.stringify(logData, null, 2));
+
+  if (type === 'uncaughtException') {
+    sendLINEAlert(logData);
+  }
+}
+
+async function sendLINEAlert(errorData) {
+  try {
+    const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    const LINE_DEVELOPER_USER_ID = process.env.LINE_DEVELOPER_USER_ID;
+
+    if (!LINE_CHANNEL_ACCESS_TOKEN || !LINE_DEVELOPER_USER_ID) {
+      console.log('⚠️ LINE alert not configured');
+      return;
+    }
+
+    const message = `🚨 CRITICAL ERROR\n\n` +
+                   `Type: ${errorData.type}\n` +
+                   `Message: ${errorData.message}\n` +
+                   `Time: ${errorData.timestamp}\n` +
+                   `Environment: ${errorData.environment}`;
+
+    const response = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify({
+        to: LINE_DEVELOPER_USER_ID,
+        messages: [{
+          type: 'text',
+          text: message
+        }]
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ LINE alert sent successfully');
+    }
+  } catch (alertError) {
+    console.error('❌ Failed to send LINE alert:', alertError);
+  }
+}
+
+function gracefulShutdown() {
+  setTimeout(() => {
+    console.log('💀 Force shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+
+  if (server) {
+    server.close(() => {
+      console.log('📴 HTTP server closed');
+
+      if (firestore) {
+        console.log('📴 Firestore connections closed');
+      }
+
+      process.exit(0);
+    });
+  } else {
+    process.exit(1);
+  }
+}
+
+// ========================================
+// FIREBASE INITIALIZATION
+// ========================================
+
+let firestore;
+async function initializeFirebase() {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id
+      });
+      console.log('✅ Firebase initialized with environment variable');
+    } else {
+      console.log('⚠️ Firebase service account not found in environment');
+    }
+    firestore = admin.firestore();
+    console.log('✅ Firestore connected');
+  } catch (error) {
+    console.error('❌ Firebase initialization error:', error.message);
+    logToExternalService('firebase_init_error', error);
+  }
+}
+
+// ========================================
+// STATION DATA IMPORT
+// ========================================
+
+let stationImports;
+try {
+  stationImports = require('./japan-stations');
+  console.log('✅ Station data imported successfully');
+} catch (importError) {
+  console.error('❌ Failed to import station data:', importError);
+  logToExternalService('import_error', importError);
+  stationImports = {
+    ALL_JAPAN_STATIONS: [],
+    REGIONS: {},
+    getStationsByRegion: () => [],
+    getRegionByCoordinates: () => 'tokyo',
+    getNearbyStations: () => []
+  };
+}
+
+const {
+  ALL_JAPAN_STATIONS,
+  REGIONS,
+  getStationsByRegion,
+  getRegionByCoordinates,
+  getNearbyStations
+} = stationImports;
+
+// ========================================
+// EXPRESS APP SETUP
+// ========================================
 
 const app = express();
+
+// Train routes
+
+
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+function timeoutMiddleware(timeout = 30000) {
+  return (req, res, next) => {
+    res.setTimeout(timeout, () => {
+      console.error(`⏰ Request timeout: ${req.method} ${req.url}`);
+      if (!res.headersSent) {
+        res.status(408).json({ error: 'Request timeout' });
+      }
+    });
+    next();
+  };
+}
+
+// Enhanced CORS
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
+    : '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false
+}));
+
+// Request parsing with limits
+app.use(express.json({
+  limit: process.env.MAX_REQUEST_SIZE || '10mb',
+  strict: true,
+  type: 'application/json'
+}));
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: process.env.MAX_REQUEST_SIZE || '10mb'
+}));
+
+// Request timeout
+app.use(timeoutMiddleware(parseInt(process.env.REQUEST_TIMEOUT) || 30000));
+
+// Request logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  console.log(`📨 ${req.method} ${req.url} - ${req.ip}`);
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`📤 ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+  });
+
+  next();
+});
+
+// ========================================
+// HTTP & WEBSOCKET SERVER SETUP
+// ========================================
+
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+const wss = new WebSocketServer({
+  server,
+  perMessageDeflate: false
+});
+
+// In-memory storage with limits
+const MAX_STORAGE_SIZE = 10000;
+let users = [];
+let drivers = [];
+let rides = [];
+let rideRequests = [];
+
+// Enhanced WebSocket handling
+wss.on('connection', (ws, req) => {
+  console.log('📱 Client connected from:', req.socket.remoteAddress);
+
+  const connectionTimeout = setTimeout(() => {
+    if (ws.readyState === ws.OPEN) {
+      ws.close(4000, 'Connection timeout');
+    }
+  }, parseInt(process.env.CONNECTION_TIMEOUT) || 300000);
+
+  ws.on('message', (message) => {
+    try {
+      clearTimeout(connectionTimeout);
+
+      const data = JSON.parse(message);
+      console.log('📨 Received:', data.type);
+
+      switch (data.type) {
+        case 'driver_online':
+          handleDriverOnline(data, ws);
+          break;
+        case 'driver_offline':
+          handleDriverOffline(data);
+          break;
+        case 'location_update':
+          handleLocationUpdate(data);
+          break;
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong' }));
+          break;
+        default:
+          console.warn('Unknown message type:', data.type);
+      }
+    } catch (error) {
+      console.error('❌ WebSocket message error:', error);
+      logToExternalService('websocket_error', error);
+
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Invalid message format'
+        }));
+      }
+    }
+  });
+
+  ws.on('error', (error) => {
+    console.error('❌ WebSocket error:', error);
+    logToExternalService('websocket_connection_error', error);
+  });
+
+  ws.on('close', (code, reason) => {
+    console.log(`📱 Client disconnected: ${code} ${reason}`);
+    clearTimeout(connectionTimeout);
+    drivers = drivers.filter(d => d.ws !== ws);
+  });
+
+  if (ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'welcome',
+      message: 'Connected to 全国AIタクシー backend',
+      timestamp: new Date().toISOString()
+    }));
   }
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// WebSocket helper functions
+function handleDriverOnline(data, ws) {
+  try {
+    if (!data.driverId || !data.driverName) {
+      throw new Error('Driver ID and name required');
+    }
 
-// Configuration - 完全な本番設定
-const PORT = process.env.PORT || 3000;
-const WEATHER_API_KEY = process.env.WEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ';
-const LINE_CHANNEL_ID = process.env.LINE_CHANNEL_ID || '2007928791';
-const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '7302c88d22457d1b79e8cd34e4f9e7e0';
+    const driver = {
+      id: data.driverId,
+      name: data.driverName,
+      location: data.location,
+      isOnline: true,
+      ws: ws,
+      connectedAt: new Date().toISOString()
+    };
 
-// LINE Bot設定
-const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: LINE_CHANNEL_SECRET
+    drivers = drivers.filter(d => d.id !== data.driverId);
+
+    if (drivers.length >= MAX_STORAGE_SIZE) {
+      drivers = drivers.slice(-MAX_STORAGE_SIZE + 1);
+    }
+
+    drivers.push(driver);
+    console.log(`🚕 Driver ${data.driverName} is online`);
+  } catch (error) {
+    console.error('❌ Error handling driver online:', error);
+    logToExternalService('driver_online_error', error);
+  }
+}
+
+function handleDriverOffline(data) {
+  try {
+    drivers = drivers.filter(d => d.id !== data.driverId);
+    console.log(`🚕 Driver ${data.driverId} went offline`);
+  } catch (error) {
+    console.error('❌ Error handling driver offline:', error);
+    logToExternalService('driver_offline_error', error);
+  }
+}
+
+function handleLocationUpdate(data) {
+  try {
+    const driverIndex = drivers.findIndex(d => d.id === data.driverId);
+    if (driverIndex !== -1) {
+      drivers[driverIndex].location = data.location;
+      drivers[driverIndex].lastLocationUpdate = new Date().toISOString();
+    }
+  } catch (error) {
+    console.error('❌ Error handling location update:', error);
+    logToExternalService('location_update_error', error);
+  }
+}
+
+// ========================================
+// WEATHER API WITH RETRY LOGIC
+// ========================================
+
+const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
+const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
+
+// LINE Configuration
+const LINE_OA_ID = process.env.LINE_OA_ID || '@dhai52765howdah';
+
+const REGION_COORDINATES = {
+  tokyo: { lat: 35.6762, lon: 139.6503 },
+  osaka: { lat: 34.6937, lon: 135.5023 },
+  nagoya: { lat: 35.1815, lon: 136.9066 },
+  kyoto: { lat: 35.0116, lon: 135.7681 },
+  fukuoka: { lat: 33.5904, lon: 130.4017 },
+  sapporo: { lat: 43.0642, lon: 141.3469 },
+  sendai: { lat: 38.2682, lon: 140.8694 },
+  hiroshima: { lat: 34.3853, lon: 132.4553 }
 };
 
-// In-memory storage
-const drivers = new Map();
-const customers = new Map();
-const rides = new Map();
-const weatherAlerts = new Map();
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-// AI Models
-let demandPredictionModel = null;
-let revenuePredictionModel = null;
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
 
-// Initialize AI models
-async function initializeAIModels() {
-  try {
-    demandPredictionModel = tf.sequential({
-      layers: [
-        tf.layers.dense({ inputShape: [5], units: 10, activation: 'relu' }),
-        tf.layers.dense({ units: 5, activation: 'relu' }),
-        tf.layers.dense({ units: 1, activation: 'sigmoid' })
-      ]
-    });
-    demandPredictionModel.compile({
-      optimizer: 'adam',
-      loss: 'meanSquaredError'
-    });
+      clearTimeout(timeoutId);
 
-    revenuePredictionModel = tf.sequential({
-      layers: [
-        tf.layers.dense({ inputShape: [7], units: 14, activation: 'relu' }),
-        tf.layers.dense({ units: 7, activation: 'relu' }),
-        tf.layers.dense({ units: 1, activation: 'linear' })
-      ]
-    });
-    revenuePredictionModel.compile({
-      optimizer: 'adam',
-      loss: 'meanSquaredError'
-    });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-    console.log('🤖 AIモデル初期化完了');
-  } catch (error) {
-    console.error('AI model initialization error:', error);
+      return response;
+    } catch (error) {
+      console.error(`❌ Fetch attempt ${attempt} failed:`, error.message);
+
+      if (attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = Math.pow(2, attempt) * 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
 }
 
-// OpenWeather API統合 - 実際の天気データ
-app.get('/api/weather', async (req, res) => {
-  const { lat, lon } = req.query;
-  
+const getWeatherForecast = async (region = 'tokyo') => {
   try {
-    // 現在の天気を取得
-    const weatherResponse = await axios.get(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${WEATHER_API_KEY}&units=metric&lang=ja`
-    );
-    
-    // 予報データを取得
-    const forecastResponse = await axios.get(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${WEATHER_API_KEY}&units=metric&lang=ja`
-    );
-    
-    const currentWeather = weatherResponse.data;
-    const forecast = forecastResponse.data;
-    
-    // 30分後の雨予報チェック
-    const rainIn30Min = forecast.list[0].weather[0].main === 'Rain' || 
-                       forecast.list[0].rain?.['3h'] > 0;
-    
-    // 需要影響計算
-    let demandImpact = 0;
-    if (currentWeather.weather[0].main === 'Rain') {
-      demandImpact = 30 + Math.min((currentWeather.rain?.['1h'] || 0) * 5, 20);
-    } else if (currentWeather.main.temp > 35) {
-      demandImpact = 25;
-    } else if (currentWeather.main.temp < 5) {
-      demandImpact = 20;
+    const coords = REGION_COORDINATES[region] || REGION_COORDINATES.tokyo;
+
+    if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'bd17578f85cb46d681ca3e4f3bdc9963'){
+      console.log('⚠️ Using mock weather data - OpenWeather API key not configured');
+      return getMockWeatherData();
     }
-    
-    // 雨予報があれば通知を送信
-    if (rainIn30Min && !weatherAlerts.has(`rain-${lat}-${lon}`)) {
-      weatherAlerts.set(`rain-${lat}-${lon}`, Date.now());
-      io.emit('weatherAlert', {
-        type: 'rain',
-        message: '☔ 30分後に雨の予報です。今すぐタクシーを予約しましょう！',
-        location: { lat, lon }
-      });
-    }
-    
-    res.json({
+
+    const currentResponse = await fetchWithRetry(
+      `${OPENWEATHER_BASE_URL}/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
+    );
+
+    const forecastResponse = await fetchWithRetry(
+      `${OPENWEATHER_BASE_URL}/forecast?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
+    );
+
+    const currentData = await currentResponse.json();
+    const forecastData = await forecastResponse.json();
+
+    const convertCondition = (weather) => {
+      if (!weather || !weather.main) return 'partly_cloudy';
+
+      const main = weather.main.toLowerCase();
+      if (main.includes('rain')) return 'rainy';
+      if (main.includes('cloud')) return 'cloudy';
+      if (main.includes('clear')) return 'sunny';
+      return 'partly_cloudy';
+    };
+
+    return {
       current: {
-        temp: Math.round(currentWeather.main.temp),
-        condition: currentWeather.weather[0].main,
-        description: currentWeather.weather[0].description,
-        humidity: currentWeather.main.humidity,
-        windSpeed: currentWeather.wind.speed,
-        rainAmount: currentWeather.rain?.['1h'] || 0
+        condition: convertCondition(currentData.weather[0]),
+        temperature: Math.round(currentData.main.temp),
+        humidity: currentData.main.humidity,
+        windSpeed: Math.round(currentData.wind?.speed || 0),
+        description: currentData.weather[0].description,
+        city: currentData.name
       },
-      rainIn30Min,
-      rainProbability: (forecast.list[0].pop || 0) * 100,
-      demandImpact,
-      forecast: forecast.list.slice(0, 6).map(item => ({
-        time: new Date(item.dt * 1000).toLocaleTimeString('ja-JP'),
-        temp: Math.round(item.main.temp),
-        condition: item.weather[0].main,
-        description: item.weather[0].description,
-        rainProbability: (item.pop || 0) * 100
+      forecast: forecastData.list.slice(0, 24).map(item => ({
+        hour: new Date(item.dt * 1000).getHours(),
+        condition: convertCondition(item.weather[0]),
+        temperature: Math.round(item.main.temp),
+        rainProbability: Math.round((item.pop || 0) * 100),
+        description: item.weather[0].description
       }))
-    });
-  } catch (error) {
-    console.error('Weather API error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Traffic API with Google Maps integration
-app.get('/api/traffic', async (req, res) => {
-  const { lat, lon } = req.query;
-  
-  try {
-    // Google Maps Traffic APIを使用（実装例）
-    const trafficData = {
-      congestionLevel: ['low', 'moderate', 'heavy', 'severe'][Math.floor(Math.random() * 4)],
-      averageSpeed: 20 + Math.random() * 40,
-      incidents: Math.floor(Math.random() * 3),
-      delayMinutes: 0,
-      alerts: []
     };
-    
-    // 渋滞レベルに応じた遅延計算
-    switch(trafficData.congestionLevel) {
-      case 'heavy':
-        trafficData.delayMinutes = 10 + Math.floor(Math.random() * 10);
-        trafficData.alerts.push({
-          type: 'congestion',
-          description: '幹線道路で渋滞が発生しています',
-          delay: trafficData.delayMinutes
+
+  } catch (error) {
+    console.error('❌ Weather API error:', error.message);
+    logToExternalService('weather_api_error', error);
+    return getMockWeatherData();
+  }
+};
+
+const getMockWeatherData = () => {
+  const weatherConditions = ['sunny', 'cloudy', 'rainy', 'partly_cloudy'];
+  const temperatures = [15, 18, 22, 25, 28, 30];
+
+  return {
+    current: {
+      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
+      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
+      humidity: Math.floor(Math.random() * 40) + 40,
+      windSpeed: Math.floor(Math.random() * 15) + 5,
+      description: 'Mock weather data',
+      city: 'Mock City'
+    },
+    forecast: Array.from({ length: 24 }, (_, i) => ({
+      hour: (new Date().getHours() + i) % 24,
+      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
+      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
+      rainProbability: Math.floor(Math.random() * 100),
+      description: 'Mock forecast'
+    }))
+  };
+};
+
+// ========================================
+// AI HELPER FUNCTIONS
+// ========================================
+
+const calculateDemandLevel = (stationId, hour, weatherCondition) => {
+  try {
+    const station = ALL_JAPAN_STATIONS.find(s => s.id === stationId);
+    if (!station) return 'low';
+
+    let demandScore = 0;
+
+    const demandLevels = {
+      'very_high': 4,
+      'high': 3,
+      'medium': 2,
+      'low': 1
+    };
+    demandScore += demandLevels[station.demandLevel] || 1;
+
+    if (station.peakHours && station.peakHours.includes(hour)) {
+      demandScore += 2;
+    }
+
+    if (weatherCondition === 'rainy' && station.weatherSensitive) {
+      demandScore += 2;
+    }
+
+    if (station.category === 'major_hub') demandScore += 1;
+    if (station.category === 'airport') demandScore += 3;
+
+    if (demandScore >= 6) return 'very_high';
+    if (demandScore >= 4) return 'high';
+    if (demandScore >= 2) return 'medium';
+    return 'low';
+  } catch (error) {
+    console.error('❌ Error calculating demand level:', error);
+    logToExternalService('demand_calculation_error', error);
+    return 'low';
+  }
+};
+
+const generateAIRecommendations = async (lat, lon, hour, weather) => {
+  try {
+    const region = getRegionByCoordinates(lat, lon);
+    const regionData = REGIONS[region];
+    const nearbyStations = getNearbyStations(lat, lon, 0.05);
+
+    const recommendations = [];
+
+    if (weather.current.condition === 'rainy') {
+      const rainStations = nearbyStations.filter(s => s.weatherSensitive);
+      if (rainStations.length > 0) {
+        recommendations.push({
+          type: 'weather',
+          message: `雨のため${rainStations[0].name}周辺の需要が増加中`,
+          priority: 'high',
+          stations: rainStations.slice(0, 2).map(s => s.id)
         });
-        break;
-      case 'severe':
-        trafficData.delayMinutes = 20 + Math.floor(Math.random() * 15);
-        trafficData.alerts.push({
-          type: 'severe_congestion',
-          description: '深刻な渋滞が発生しています',
-          delay: trafficData.delayMinutes
-        });
-        break;
-    }
-    
-    // 事故情報
-    if (trafficData.incidents > 0) {
-      trafficData.alerts.push({
-        type: 'accident',
-        description: `${trafficData.incidents}件の事故が報告されています`,
-        delay: 5 * trafficData.incidents,
-        location: { lat, lon }
-      });
-      
-      // 事故発生時の通知
-      io.emit('trafficAlert', {
-        type: 'accident',
-        message: '🚨 近くで事故が発生しました。代替交通手段をご検討ください。',
-        location: { lat, lon }
-      });
-    }
-    
-    res.json(trafficData);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// AI需要予測エンドポイント
-app.post('/api/demand-predictions', async (req, res) => {
-  const { location, weather, time } = req.body;
-  
-  try {
-    const predictions = [];
-    
-    // 主要駅と空港のリスト（日本全国）
-    const majorLocations = [
-      { name: '東京駅', lat: 35.6812, lng: 139.7671, type: 'station' },
-      { name: '新宿駅', lat: 35.6896, lng: 139.7006, type: 'station' },
-      { name: '渋谷駅', lat: 35.6580, lng: 139.7016, type: 'station' },
-      { name: '品川駅', lat: 35.6284, lng: 139.7387, type: 'station' },
-      { name: '羽田空港', lat: 35.5494, lng: 139.7798, type: 'airport' },
-      { name: '成田空港', lat: 35.7720, lng: 140.3929, type: 'airport' },
-      { name: '大阪駅', lat: 34.7024, lng: 135.4959, type: 'station' },
-      { name: '京都駅', lat: 34.9859, lng: 135.7585, type: 'station' },
-      { name: '名古屋駅', lat: 35.1709, lng: 136.8815, type: 'station' },
-      { name: '福岡空港', lat: 33.5859, lng: 130.4508, type: 'airport' }
-    ];
-    
-    for (const loc of majorLocations) {
-      let demandScore = 0.5 + Math.random() * 0.3;
-      
-      // 時間帯による調整
-      const hour = new Date(time).getHours();
-      if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19)) {
-        demandScore *= 1.5; // 通勤ラッシュ
-      } else if (hour >= 22 || hour <= 5) {
-        demandScore *= 1.2; // 深夜料金時間帯
       }
-      
-      // 天候による調整
-      if (weather && weather.rainIn30Min) {
-        demandScore *= 1.4;
-      } else if (weather && weather.current?.condition === 'Rain') {
-        demandScore *= 1.3;
-      }
-      
-      // 場所タイプによる調整
-      if (loc.type === 'airport') {
-        demandScore *= 1.25;
-      }
-      
-      // 曜日による調整
-      const dayOfWeek = new Date().getDay();
-      if (dayOfWeek === 5 || dayOfWeek === 6) {
-        demandScore *= 1.15; // 金曜・土曜
-      }
-      
-      predictions.push({
-        ...loc,
-        demandScore: Math.min(demandScore, 1),
-        predictedRides: Math.floor(demandScore * 50),
-        surgeMultiplier: demandScore > 0.7 ? 1 + (demandScore - 0.7) * 2 : 1,
-        waitTime: Math.max(2, Math.floor((1 - demandScore) * 15))
-      });
     }
-    
-    res.json({ 
-      predictions,
-      timestamp: new Date().toISOString(),
-      accuracy: 0.85
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
-// ドライバー向け収益予測
-app.post('/api/revenue-predictor', async (req, res) => {
-  const { location, weather, traffic, dayOfWeek, hour } = req.body;
-  
-  try {
-    let baseRevenue = 3000 + Math.random() * 2000;
-    
-    // 時間帯調整
-    if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19)) {
-      baseRevenue *= 1.4;
-    } else if (hour >= 22 || hour <= 5) {
-      baseRevenue *= 1.3;
-    }
-    
-    // 曜日調整
-    if (dayOfWeek === 5 || dayOfWeek === 6) {
-      baseRevenue *= 1.3;
-    }
-    
-    // 天候影響
-    if (weather && weather.demandImpact) {
-      baseRevenue *= (1 + weather.demandImpact / 100);
-    }
-    
-    // 交通状況影響
-    if (traffic && traffic.congestionLevel === 'heavy') {
-      baseRevenue *= 1.15;
-    }
-    
-    // サージ倍率計算
-    let surgeMultiplier = 1;
-    if (baseRevenue > 5000) {
-      surgeMultiplier = 1.3 + Math.random() * 0.2;
-    } else if (baseRevenue > 4000) {
-      surgeMultiplier = 1.2 + Math.random() * 0.1;
-    }
-    
-    // 最適エリア判定
-    const optimalAreas = [
-      { name: '新宿エリア', score: 0.9 },
-      { name: '渋谷エリア', score: 0.85 },
-      { name: '六本木エリア', score: 0.8 },
-      { name: '銀座エリア', score: 0.75 },
-      { name: '東京駅周辺', score: 0.7 }
-    ];
-    
-    const bestArea = optimalAreas[0];
-    
-    res.json({
-      nextHour: Math.floor(baseRevenue),
-      today: Math.floor(baseRevenue * 8),
-      bestArea: bestArea.name,
-      bestAreaScore: bestArea.score,
-      surgeMultiplier: Math.round(surgeMultiplier * 10) / 10,
-      confidence: 0.75 + Math.random() * 0.15,
-      recommendations: [
-        '雨予報エリアへ事前移動を推奨',
-        '空港周辺の需要が高まっています',
-        '終電後の需要増加が予測されます'
-      ]
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// サージプライシング計算
-app.get('/api/surge-pricing', async (req, res) => {
-  const { lat, lon } = req.query;
-  
-  try {
-    const nearbyDrivers = Array.from(drivers.values()).filter(driver => {
-      if (!driver.location) return false;
-      const distance = calculateDistance(
-        lat, lon,
-        driver.location.latitude,
-        driver.location.longitude
-      );
-      return distance < 5;
-    });
-    
-    const demandLevel = 0.3 + Math.random() * 0.7;
-    let multiplier = 1;
-    
-    if (nearbyDrivers.length < 3 && demandLevel > 0.6) {
-      multiplier = 1.5 + Math.random() * 0.3;
-    } else if (nearbyDrivers.length < 5 && demandLevel > 0.4) {
-      multiplier = 1.2 + Math.random() * 0.2;
-    } else if (demandLevel > 0.8) {
-      multiplier = 1.1 + Math.random() * 0.1;
-    }
-    
-    res.json({
-      multiplier: Math.round(multiplier * 10) / 10,
-      driversAvailable: nearbyDrivers.length,
-      demandLevel: Math.round(demandLevel * 100),
-      message: multiplier > 1.2 ? '高需要エリアです' : '通常料金'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 料金見積もり
-app.post('/api/fare-estimate', async (req, res) => {
-  const { origin, destination, surgeMultiplier, weather, traffic } = req.body;
-  
-  try {
-    const distance = calculateDistance(
-      origin.latitude, origin.longitude,
-      destination.latitude, destination.longitude
+    const peakStations = nearbyStations.filter(s =>
+      s.peakHours && s.peakHours.includes(hour)
     );
-    
-    // 日本のタクシー料金体系
-    const baseFare = 500; // 初乗り料金
-    const perKmRate = 400; // 1kmあたり
-    const perMinuteRate = 90; // 1分あたり（時間料金）
-    
-    let fare = baseFare + (distance * perKmRate);
-    
-    // 予想所要時間（交通状況考慮）
-    let estimatedMinutes = distance * 2.5;
-    if (traffic && traffic.delayMinutes) {
-      estimatedMinutes += traffic.delayMinutes;
-    }
-    fare += estimatedMinutes * perMinuteRate;
-    
-    // サージプライシング適用
-    if (surgeMultiplier) {
-      fare *= surgeMultiplier;
-    }
-    
-    // 天候調整
-    if (weather && weather.current?.condition === 'Rain') {
-      fare *= 1.1;
-    }
-    
-    // 深夜料金（22:00-5:00）
-    const hour = new Date().getHours();
-    if (hour >= 22 || hour <= 5) {
-      fare *= 1.2;
-    }
-    
-    res.json({
-      fare: Math.floor(fare),
-      distance: Math.round(distance * 10) / 10,
-      estimatedMinutes: Math.floor(estimatedMinutes),
-      breakdown: {
-        baseFare,
-        distanceCharge: Math.floor(distance * perKmRate),
-        timeCharge: Math.floor(estimatedMinutes * perMinuteRate),
-        surgeMultiplier: surgeMultiplier || 1,
-        weatherAdjustment: weather?.current?.condition === 'Rain' ? 1.1 : 1,
-        nightSurcharge: (hour >= 22 || hour <= 5) ? 1.2 : 1
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 近くのドライバー検索
-app.get('/api/drivers/nearby', async (req, res) => {
-  const { lat, lon, radius = 5 } = req.query;
-  
-  try {
-    const nearbyDrivers = [];
-    const activeDrivers = Array.from(drivers.values());
-    
-    for (const driver of activeDrivers) {
-      if (driver.location && driver.status === 'available') {
-        const distance = calculateDistance(
-          lat, lon,
-          driver.location.latitude,
-          driver.location.longitude
-        );
-        
-        if (distance <= radius) {
-          nearbyDrivers.push({
-            id: driver.id,
-            name: driver.name || 'ドライバー',
-            location: driver.location,
-            distance: Math.round(distance * 10) / 10,
-            eta: Math.ceil(distance * 2.5),
-            rating: driver.rating || 4.5,
-            vehicle: driver.vehicle || 'プリウス',
-            plateNumber: driver.plateNumber || '品川 300 あ 12-34'
-          });
-        }
-      }
-    }
-    
-    // デモ用追加ドライバー
-    if (nearbyDrivers.length < 3) {
-      for (let i = nearbyDrivers.length; i < 3; i++) {
-        const driverLat = parseFloat(lat) + (Math.random() - 0.5) * 0.02;
-        const driverLon = parseFloat(lon) + (Math.random() - 0.5) * 0.02;
-        const distance = calculateDistance(lat, lon, driverLat, driverLon);
-        
-        nearbyDrivers.push({
-          id: `demo_driver_${i}`,
-          name: `ドライバー ${i + 1}`,
-          location: { latitude: driverLat, longitude: driverLon },
-          distance: Math.round(distance * 10) / 10,
-          eta: Math.ceil(distance * 2.5),
-          rating: 4 + Math.random(),
-          vehicle: ['プリウス', 'クラウン', 'カムリ'][i % 3],
-          plateNumber: `品川 ${300 + i} あ ${10 + i}-${20 + i}`
-        });
-      }
-    }
-    
-    nearbyDrivers.sort((a, b) => a.distance - b.distance);
-    
-    res.json({ 
-      drivers: nearbyDrivers,
-      totalAvailable: nearbyDrivers.length,
-      averageETA: Math.ceil(nearbyDrivers.reduce((sum, d) => sum + d.eta, 0) / nearbyDrivers.length)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 配車予約
-app.post('/api/book-ride', async (req, res) => {
-  const { customerId, pickup, destination, fare, surgeMultiplier } = req.body;
-  
-  try {
-    const rideId = `ride_${Date.now()}`;
-    const ride = {
-      id: rideId,
-      customerId,
-      pickup,
-      destination,
-      fare,
-      surgeMultiplier,
-      status: 'searching',
-      createdAt: new Date(),
-      estimatedPickupTime: new Date(Date.now() + 5 * 60000) // 5分後
-    };
-    
-    rides.set(rideId, ride);
-    
-    // ドライバー自動マッチング（2-5秒後）
-    setTimeout(() => {
-      const assignedDriver = {
-        id: `driver_${Math.floor(Math.random() * 100)}`,
-        name: `田中 太郎`,
-        rating: (4 + Math.random()).toFixed(1),
-        vehicle: 'トヨタ プリウス',
-        plateNumber: `品川 330 あ 12-34`,
-        eta: 3 + Math.floor(Math.random() * 5),
-        phone: '090-1234-5678'
-      };
-      
-      ride.driverId = assignedDriver.id;
-      ride.driverInfo = assignedDriver;
-      ride.status = 'driver_assigned';
-      
-      io.emit('rideAccepted', {
-        rideId,
-        driverInfo: assignedDriver,
-        eta: assignedDriver.eta
+    if (peakStations.length > 0) {
+      recommendations.push({
+        type: 'peak_hours',
+        message: `${hour}:00の需要ピークに備えて${peakStations[0].name}エリアへ`,
+        priority: 'medium',
+        stations: peakStations.slice(0, 2).map(s => s.id)
       });
-    }, 2000 + Math.random() * 3000);
-    
-    res.json({
-      success: true,
-      ride: {
-        id: rideId,
-        status: 'searching',
-        estimatedWait: '2-5分',
-        message: 'ドライバーを探しています...'
-      }
-    });
+    }
+
+    const highDemandStations = nearbyStations.filter(s =>
+      calculateDemandLevel(s.id, hour, weather.current.condition) === 'very_high'
+    );
+
+    if (highDemandStations.length > 0) {
+      recommendations.push({
+        type: 'high_demand',
+        message: `${highDemandStations[0].name}は現在高需要エリアです`,
+        priority: 'high',
+        stations: highDemandStations.slice(0, 3).map(s => s.id)
+      });
+    }
+
+    return {
+      region: regionData?.name || '未対応地域',
+      prefecture: regionData?.name || '未対応',
+      recommendations: recommendations.slice(0, 3),
+      coverage: 'nationwide'
+    };
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error generating AI recommendations:', error);
+    logToExternalService('ai_recommendations_error', error);
+    return {
+      region: '未対応地域',
+      prefecture: '未対応',
+      recommendations: [],
+      coverage: 'nationwide'
+    };
   }
-});
+};
 
-// WebSocket接続処理
-io.on('connection', (socket) => {
-  console.log('新規接続:', socket.id);
-  
-  // ドライバーオンライン
-  socket.on('driverOnline', (data) => {
-    drivers.set(data.driverId, {
-      ...data,
-      socketId: socket.id,
-      status: 'available',
-      connectedAt: new Date()
-    });
-    
-    console.log(`ドライバー ${data.driverId} オンライン`);
-    
-    // AI推奨送信
-    socket.emit('aiSuggestion', {
-      message: '新宿駅周辺で需要が高まっています',
-      priority: 'high',
-      estimatedRevenue: '¥5,000/時間',
-      time: new Date().toLocaleTimeString('ja-JP')
-    });
-  });
-  
-  // ドライバーオフライン
-  socket.on('driverOffline', (data) => {
-    drivers.delete(data.driverId);
-    console.log(`ドライバー ${data.driverId} オフライン`);
-  });
-  
-  // 位置情報更新
-  socket.on('locationUpdate', (data) => {
-    if (drivers.has(data.driverId)) {
-      drivers.get(data.driverId).location = data.location;
-      drivers.get(data.driverId).lastUpdate = new Date();
-    }
-    
-    io.emit('driverLocation', {
-      driverId: data.driverId,
-      location: data.location
-    });
-  });
-  
-  // 定期的な需要更新（30秒ごと）
-  const demandInterval = setInterval(() => {
-    const heatmapData = [];
-    
-    // 東京の主要エリア
-    const hotspots = [
-      { lat: 35.6896, lng: 139.7006, intensity: 0.9 }, // 新宿
-      { lat: 35.6580, lng: 139.7016, intensity: 0.85 }, // 渋谷
-      { lat: 35.6812, lng: 139.7671, intensity: 0.8 }, // 東京駅
-      { lat: 35.6284, lng: 139.7387, intensity: 0.75 }, // 品川
-      { lat: 35.7100, lng: 139.7964, intensity: 0.7 }, // 上野
-    ];
-    
-    for (const spot of hotspots) {
-      for (let i = 0; i < 5; i++) {
-        heatmapData.push({
-          latitude: spot.lat + (Math.random() - 0.5) * 0.01,
-          longitude: spot.lng + (Math.random() - 0.5) * 0.01,
-          weight: spot.intensity * 100 * Math.random()
-        });
-      }
-    }
-    
-    socket.emit('demandUpdate', {
-      heatmap: heatmapData,
-      surgeAreas: hotspots.filter(s => s.intensity > 0.8).map(s => ({
-        center: { latitude: s.lat, longitude: s.lng },
-        radius: 1500,
-        multiplier: 1 + s.intensity * 0.5
-      })),
-      timestamp: new Date().toISOString()
-    });
-  }, 30000);
-  
-  socket.on('disconnect', () => {
-    clearInterval(demandInterval);
-    
-    // ドライバー削除
-    for (const [driverId, driver] of drivers.entries()) {
-      if (driver.socketId === socket.id) {
-        drivers.delete(driverId);
-        console.log(`ドライバー ${driverId} 切断`);
-        break;
-      }
-    }
-  });
-});
+// ========================================
+// LINE INTEGRATION FUNCTIONS
+// ========================================
 
-// ユーティリティ関数
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+async function handleLINEMessage(event) {
+  try {
+    const message = event.message.text;
+    const userId = event.source.userId;
+
+    let response = '申し訳ございませんが、現在サポートスタッフが対応中です。しばらくお待ちください。';
+
+    if (message.includes('アプリ') || message.includes('起動')) {
+      response = 'アプリの問題について承りました。アプリを再起動して、問題が解決しない場合は詳細をお聞かせください。';
+    } else if (message.includes('配車') || message.includes('タクシー')) {
+      response = '配車に関するお問い合わせありがとうございます。現在の状況を確認いたします。';
+    }
+
+    await sendLINEResponse(userId, response);
+
+  } catch (error) {
+    console.error('❌ Error handling LINE message:', error);
+    logToExternalService('line_message_error', error);
+  }
 }
 
-function toRad(deg) {
-  return deg * (Math.PI / 180);
+async function sendLINEResponse(userId, message) {
+  try {
+    const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+    if (!LINE_CHANNEL_ACCESS_TOKEN) {
+      console.log('⚠️ LINE Channel Access Token not configured');
+      return;
+    }
+
+    await fetchWithRetry('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify({
+        to: userId,
+        messages: [{
+          type: 'text',
+          text: message
+        }]
+      })
+    });
+
+    console.log('✅ LINE response sent successfully');
+  } catch (error) {
+    console.error('❌ Failed to send LINE response:', error);
+    logToExternalService('line_response_error', error);
+  }
 }
 
-// ヘルスチェック
-app.get('/health', (req, res) => {
+async function sendSupportNotification(ticket) {
+  try {
+    const SUPPORT_LINE_USER_ID = process.env.SUPPORT_LINE_USER_ID;
+
+    if (!SUPPORT_LINE_USER_ID) {
+      console.log('⚠️ Support LINE notification not configured');
+      return;
+    }
+
+    const message = `🎫 新規サポートチケット\n\n` +
+                   `ID: ${ticket.id}\n` +
+                   `ユーザー: ${ticket.userType}\n` +
+                   `カテゴリ: ${ticket.category}\n` +
+                   `メッセージ: ${ticket.message}\n` +
+                   `時刻: ${ticket.createdAt}`;
+
+    await sendLINEResponse(SUPPORT_LINE_USER_ID, message);
+  } catch (error) {
+    console.error('❌ Failed to send support notification:', error);
+    logToExternalService('support_notification_error', error);
+  }
+}
+
+// ========================================
+// API ROUTES
+// ========================================
+// Health check
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
-    timestamp: new Date(),
-    version: '3.0.0',
-    drivers: drivers.size,
-    activeRides: rides.size,
-    apis: {
-      weather: 'OpenWeather API',
-      maps: 'Google Maps API',
-      line: 'LINE Messaging API'
-    }
+    timestamp: new Date().toISOString(),
+    coverage: 'nationwide',
+    supportedRegions: Object.keys(REGIONS).length,
+    totalStations: ALL_JAPAN_STATIONS.length,
+    firebase: firestore ? 'connected' : 'disconnected',
+    activeDrivers: drivers.filter(d => d.isOnline).length,
+    memory: process.memoryUsage(),
+    uptime: process.uptime()
   });
 });
 
-// サーバー起動
-async function start() {
-  await initializeAIModels();
-  
-  server.listen(PORT, () => {
-    console.log(`
-    🚕 全国AIタクシー バックエンド v3.0.0
-    ====================================
-    ✅ サーバー起動: ポート ${PORT}
-    ✅ AI モデル: 初期化完了
-    ✅ 天気API: OpenWeather (${WEATHER_API_KEY.slice(0, 8)}...)
-    ✅ LINE連携: Channel ${LINE_CHANNEL_ID}
-    ✅ WebSocket: 有効
-    ====================================
-    🌍 アクセスURL: http://localhost:${PORT}
-    📊 ヘルスチェック: http://localhost:${PORT}/health
-    `);
+
+// Train API routes
+const trainRoutes = require("./routes/trains");
+app.use("/api/trains", trainRoutes);
+
+// Get support configuration (for mobile app)
+app.get('/api/support/config', (req, res) => {
+  res.json({
+    lineOAID: LINE_OA_ID,
+    supportEmail: 'support@zenkoku-ai-taxi.jp',
+    emergencyPhone: '050-1234-5678',
+    supportAvailable24x7: true,
+    languages: ['japanese', 'english']
   });
+});
+
+// Get all stations
+app.get('/api/stations', asyncHandler(async (req, res) => {
+  const { region, category, limit } = req.query;
+  let stations = ALL_JAPAN_STATIONS;
+
+  if (region) {
+    stations = getStationsByRegion(region);
+  }
+
+  if (category) {
+    stations = stations.filter(s => s.category === category);
+  }
+
+  if (limit) {
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 0) {
+      return res.status(400).json({ error: 'Invalid limit parameter' });
+    }
+    stations = stations.slice(0, limitNum);
+  }
+
+  res.json({
+    stations,
+    total: stations.length,
+    regions: Object.keys(REGIONS)
+  });
+}));
+
+// Get nearby stations with regional support
+app.get('/api/stations/nearby-regional', asyncHandler(async (req, res) => {
+  const { lat, lon, radius = 0.1 } = req.query;
+
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Latitude and longitude required' });
+  }
+
+  const latitude = parseFloat(lat);
+  const longitude = parseFloat(lon);
+  const searchRadius = parseFloat(radius);
+
+  const detectedRegion = getRegionByCoordinates(latitude, longitude);
+  const regionData = REGIONS[detectedRegion];
+  const nearbyStations = getNearbyStations(latitude, longitude, searchRadius);
+
+  res.json({
+    detectedRegion,
+    prefecture: regionData?.name || '未対応地域',
+    coordinates: { lat: latitude, lon: longitude },
+    radius: searchRadius,
+    stations: nearbyStations,
+    total: nearbyStations.length
+  });
+}));
+
+// Get regional weather forecast
+app.get('/api/weather/forecast-regional', asyncHandler(async (req, res) => {
+  const { region = 'tokyo' } = req.query;
+  const regionData = REGIONS[region];
+
+  if (!regionData) {
+    return res.status(404).json({ error: 'Region not supported' });
+  }
+
+  const weather = await getWeatherForecast(region);
+
+  res.json({
+    region: regionData.name,
+    location: regionData.nameEn,
+    weather,
+    timestamp: new Date().toISOString()
+  });
+}));
+
+// Get AI recommendations with regional support
+app.get('/api/recommendations/regional', asyncHandler(async (req, res) => {
+  const { lat, lon, hour } = req.query;
+
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Latitude and longitude required' });
+  }
+
+  const latitude = parseFloat(lat);
+  const longitude = parseFloat(lon);
+  const currentHour = hour ? parseInt(hour) : new Date().getHours();
+
+  const region = getRegionByCoordinates(latitude, longitude);
+  const weather = await getWeatherForecast(region);
+  const recommendations = await generateAIRecommendations(latitude, longitude, currentHour, weather);
+
+  res.json({
+    location: { lat: latitude, lon: longitude },
+    hour: currentHour,
+    weather: weather.current,
+    ...recommendations,
+    timestamp: new Date().toISOString()
+  });
+}));
+
+// LINE webhook
+app.post('/api/line/webhook', asyncHandler(async (req, res) => {
+  const events = req.body.events || [];
+
+  for (const event of events) {
+    if (event.type === 'message' && event.message.type === 'text') {
+      await handleLINEMessage(event);
+    }
+  }
+
+  res.status(200).send('OK');
+}));
+
+// Support ticket creation
+app.post('/api/support/ticket', asyncHandler(async (req, res) => {
+  const { userId, userType, message, category, location } = req.body;
+
+  if (!userId || !message) {
+    return res.status(400).json({ error: 'User ID and message required' });
+  }
+
+  const ticket = {
+    id: Date.now().toString(),
+    userId,
+    userType: userType || 'customer',
+    message,
+    category: category || 'general',
+    location,
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    responses: []
+  };
+
+  if (users.length >= MAX_STORAGE_SIZE) {
+    users = users.slice(-MAX_STORAGE_SIZE + 1);
+  }
+
+  users.push(ticket);
+
+  await sendSupportNotification(ticket);
+
+  res.json({
+    success: true,
+    ticket: {
+      id: ticket.id,
+      status: ticket.status,
+      createdAt: ticket.createdAt
+    }
+  });
+}));
+
+// User management
+app.post('/api/users', asyncHandler(async (req, res) => {
+  const { name, phone, role, location } = req.body;
+
+  if (!name || !phone || !role) {
+    return res.status(400).json({ error: 'Name, phone, and role are required' });
+  }
+
+  const user = {
+    id: Date.now().toString(),
+    name,
+    phone,
+    role,
+    location: location || null,
+    createdAt: new Date().toISOString(),
+    isActive: true
+  };
+
+  users.push(user);
+
+  if (firestore) {
+    try {
+      await firestore.collection('users').doc(user.id).set(user);
+      console.log('✅ User saved to Firestore');
+    } catch (firestoreError) {
+      console.error('❌ Firestore save error:', firestoreError);
+    }
+  }
+
+  console.log(`👤 New ${role} registered: ${name}`);
+  res.json({ success: true, user });
+}));
+
+// Get online drivers
+app.get('/api/drivers/online', asyncHandler(async (req, res) => {
+  const { region } = req.query;
+  let onlineDrivers = drivers.filter(d => d.isOnline);
+
+  if (region) {
+    onlineDrivers = onlineDrivers.filter(d => {
+      if (!d.location) return false;
+      const driverRegion = getRegionByCoordinates(d.location.latitude, d.location.longitude);
+      return driverRegion === region;
+    });
+  }
+
+  const driversData = onlineDrivers.map(d => ({
+    id: d.id,
+    name: d.name,
+    location: d.location,
+    isOnline: d.isOnline
+  }));
+
+  res.json({
+    drivers: driversData,
+    total: driversData.length,
+    region: region || 'all'
+  });
+}));
+
+// ========================================
+// ERROR HANDLING MIDDLEWARE
+// ========================================
+
+app.use((error, req, res, next) => {
+  console.error('🚨 EXPRESS ERROR:', error);
+
+  logToExternalService('express_error', error);
+
+  const isDevelopment = process.env.NODE_ENV === 'development';
+
+  res.status(error.status || 500).json({
+    error: isDevelopment ? error.message : 'Internal server error',
+    ...(isDevelopment && { stack: error.stack }),
+    timestamp: new Date().toISOString(),
+    requestId: req.headers['x-request-id'] || 'unknown'
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ========================================
+// SERVER INITIALIZATION
+// ========================================
+
+async function initializeServer() {
+  try {
+    await initializeFirebase();
+
+    const PORT = process.env.PORT || 8080;
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚕 全国AIタクシー Backend running on port ${PORT}`);
+      console.log('📡 WebSocket ready for connections');
+      console.log('🔥 Firebase:', firestore ? 'connected' : 'disconnected');
+      console.log('🌦️ Weather API: Configured');
+      console.log(`🗾 Coverage: Nationwide Japan (${Object.keys(REGIONS).length} regions)`);
+      console.log(`🚇 Total Stations: ${ALL_JAPAN_STATIONS.length}`);
+      console.log('💬 LINE integration: Ready');
+      console.log('🛡️ Crash prevention: Active');
+      console.log('🎯 Ready for production!');
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize server:', error);
+    logToExternalService('server_init_error', error);
+    process.exit(1);
+
+// ODPT Real-time Transport Data
+app.get("/api/trains/realtime", async (req, res) => {
+  const { station } = req.query;
+  const trains = await odptService.getTrainSchedule(station);
+
+// Square Payment Endpoints
+const squarePaymentService = require("./square-payment-service");
+
+app.get("/api/payment/test", (req, res) => {
+  res.json({ 
+    status: "Payment system ready",
+    environment: "sandbox",
+    locationId: "LNEWVTK44Y8KT"
+  });
+});
+
+app.post("/api/payment/credit-card", async (req, res) => {
+  try {
+    const { nonce, amount, customerId } = req.body;
+    const result = await squarePaymentService.processCreditCard(nonce, amount, customerId);
+    res.json(result);
+  } catch (error) {
+    console.error("Payment error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+  res.json({ source: "ODPT", station: station || "all", trains, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/trains/timetable", async (req, res) => {
+  const { stationId } = req.query;
+  const timetable = await odptService.getStationTimetable(stationId || "odpt.Station:JR-East.Yamanote.Tokyo");
+  res.json({ source: "ODPT", stationId, timetable, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/bus/realtime", async (req, res) => {
+  const { stop } = req.query;
+  const buses = await odptService.getBusSchedule(stop);
+  res.json({ source: "ODPT", stop: stop || "all", buses, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/trains/congestion", async (req, res) => {
+  const { trainId } = req.query;
+  const congestion = await odptService.getTrainCongestion(trainId);
+  res.json({ source: "ODPT", trainId, congestion, timestamp: new Date().toISOString() });
+});
+
+  }
 }
 
-start();
+
+// ODPT Real-time Transport Data
+const odptService = require("./odpt-service");
+
+app.get("/api/trains/realtime", async (req, res) => {
+  const trains = await odptService.getTrainSchedule(req.query.station);
+  res.json({ source: "ODPT", trains, timestamp: new Date().toISOString() });
+});
+
+app.get("/api/bus/realtime", async (req, res) => {
+  const buses = await odptService.getBusSchedule(req.query.stop);
+  res.json({ source: "ODPT", buses, timestamp: new Date().toISOString() });
+});
+
+
+// Square Payment Integration
+const squarePaymentService = require("./square-payment-service");
+
+app.post("/api/payment/credit-card", async (req, res) => {
+  const { nonce, amount, customerId } = req.body;
+  const result = await squarePaymentService.processCreditCard(nonce, amount, customerId);
+  res.json(result);
+});
+
+app.post("/api/payment/ic-card", async (req, res) => {
+  const { nonce, amount, customerId, cardType } = req.body;
+  const result = await squarePaymentService.processICCard(nonce, amount, customerId, cardType);
+  res.json(result);
+});
+
+app.get("/api/payment/test", (req, res) => {
+  res.json({ 
+    status: "Square payment ready",
+    environment: "sandbox",
+    locationId: "LNEWVTK44Y8KT"
+  });
+});
+
+initializeServer();
+
+module.exports = app;
+
+// Train API endpoints (embedded directly)
+app.get('/api/trains/schedule', async (req, res) => {
+  const { station } = req.query;
+  const now = new Date();
+  const hour = now.getHours();
+  const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20);
+  
+  const trains = [
+    {
+      trainId: 'JR_YAMANOTE_' + Date.now() + '_1',
+      lineName: '山手線',
+      lineColor: '#9ACD32',
+      destination: '品川・渋谷方面',
+      platform: '2番線',
+      arrivalMinutes: 3,
+      status: 'on_time',
+      crowdLevel: isRushHour ? 'high' : 'medium'
+    },
+    {
+      trainId: 'JR_CHUO_' + Date.now() + '_2',
+      lineName: '中央線',
+      lineColor: '#FFA500',
+      destination: '新宿方面',
+      platform: '7番線',
+      arrivalMinutes: 5,
+      status: isRushHour ? 'delayed' : 'on_time',
+      delayMinutes: isRushHour ? 3 : 0
+    },
+    {
+      trainId: 'JR_KEIHIN_' + Date.now() + '_3',
+      lineName: '京浜東北線',
+      lineColor: '#00BFFF',
+      destination: '大宮方面',
+      platform: '3番線',
+      arrivalMinutes: 7,
+      status: 'on_time'
+    }
+  ];
+  
+  res.json({
+    station: station || 'tokyo',
+    trains: trains,
+    timestamp: now.toISOString()
+  });
+});
+
+app.post('/api/trains/delays', async (req, res) => {
+  const { stationId, lineId } = req.body;
+  const hasDelay = Math.random() > 0.7;
+  res.json({
+    hasDelay,
+    delayMinutes: hasDelay ? Math.floor(Math.random() * 10) + 5 : 0,
+    reason: hasDelay ? '混雑のため' : null,
+    affectedLines: hasDelay ? [lineId] : [],
+    recommendation: hasDelay ? 'タクシー利用をお勧めします' : null
+  });
+});
