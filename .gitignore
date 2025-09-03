@@ -97,3 +97,4 @@ build/
 # OS files
 Thumbs.db
 >>>>>>> 7847aa551099852e710259111fe8828a84ef5396
+node_modules/
