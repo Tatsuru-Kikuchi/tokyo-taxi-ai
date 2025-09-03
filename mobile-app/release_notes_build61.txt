@@ -1,0 +1,47 @@
+Build 61 Release Notes
+======================
+
+NEW FEATURES:
+• Google Maps Integration
+  - Real-time map view with current location
+  - Smooth animations and gestures
+  - Satellite/standard view toggle
+
+• AI Demand Prediction Visualization
+  - Color-coded heatmap overlay
+  - Red: High demand (>70% intensity)
+  - Orange: Medium demand (40-70% intensity)  
+  - Yellow: Low demand (<40% intensity)
+
+• Weather-Responsive Demand
+  - Automatic demand increase during rain
+  - Temperature-based predictions
+  - Real-time weather updates
+
+• Enhanced Map Controls
+  - 📍 Center on current location
+  - 🗺 Switch map type
+  - 🔥 Toggle heatmap overlay
+  - Demand intensity legend
+
+• Station Integration
+  - High-demand stations marked
+  - Distance calculations
+  - Recommended pickup points
+
+IMPROVEMENTS:
+• Faster location detection
+• Better error handling for offline mode
+• Optimized battery usage
+• Smoother UI transitions
+
+FIXES:
+• Resolved location permission issues
+• Fixed socket connection timeouts
+• Improved memory management
+
+Testing Notes for App Store:
+- App requests location permission on first launch
+- Map centers on Tokyo if location unavailable
+- All features work offline with cached data
+- No login required for testing

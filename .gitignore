@@ -1,9 +1,45 @@
 # Dependencies
 node_modules/
+<<<<<<< HEAD
+=======
+.pnp
+.pnp.js
+
+# Expo
+.expo/
+dist/
+*.orig.*
+web-build/
+
+# Native
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Testing
+coverage/
+
+# Production
+build/
+
+# Misc
+.DS_Store
+*.pem
+.env
+.env.local
+
+# Debug
+>>>>>>> 7847aa551099852e710259111fe8828a84ef5396
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+<<<<<<< HEAD
 # Environment variables
 .env
 .env.local
@@ -31,10 +67,25 @@ Thumbs.db
 *.swp
 *.swo
 
+=======
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Firebase
+serviceAccountKey.json
+*.serviceAccountKey.json
+firebase-debug.log
+.firebase/
+
+>>>>>>> 7847aa551099852e710259111fe8828a84ef5396
 # Logs
 logs/
 *.log
 
+<<<<<<< HEAD
 # Testing
 coverage/
 .nyc_output/
@@ -42,3 +93,7 @@ coverage/
 # Build files
 dist/
 build/
+=======
+# OS files
+Thumbs.db
+>>>>>>> 7847aa551099852e710259111fe8828a84ef5396

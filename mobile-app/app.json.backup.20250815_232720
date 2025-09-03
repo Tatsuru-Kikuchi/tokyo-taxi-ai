@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "全国AIタクシー",
+    "slug": "tokyo-taxi-ai",
+    "version": "3.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tatsuru-kikuchi.tokyo-taxi-ai",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
+        "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.tatsuru_kikuchi.tokyo_taxi_ai",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
+      }
+    }
+  }
+}
