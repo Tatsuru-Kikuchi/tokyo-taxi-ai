@@ -311,9 +311,9 @@ npm test
 
 このプロジェクトは MIT ライセンスの下で公開されています。
 
-## 👤 作者
+## 👤 CEO/開発責任者
 
-**Tatsuru Kikuchi**
+**Tatsuru Kikuchi, Ph.D.**
 
 - GitHub: [@Tatsuru-Kikuchi](https://github.com/Tatsuru-Kikuchi)
 - Project Link: [https://github.com/Tatsuru-Kikuchi/tokyo-taxi-ai](https://github.com/Tatsuru-Kikuchi/tokyo-taxi-ai)
@@ -359,4 +359,3 @@ npm test
   Made with ❤️ by Tatsuru Kikuchi<br>
   © 2025 All Rights Reserved
 </p>
->>>>>>> 7847aa551099852e710259111fe8828a84ef5396
