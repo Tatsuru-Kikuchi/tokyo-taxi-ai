@@ -77,7 +77,7 @@ npm run dev
 \```
 
 ## 4. Updated package.json
-\```json
+\```javascript
 {
   "name": "zenkoku-ai-taxi-backend",
   "version": "3.0.1",
@@ -185,17 +185,19 @@ AI技術を活用した次世代配車サービスアプリケーション。天
 ### インストール手順
 
 1. **リポジトリのクローン**
-```bash
+\```bash
 git clone https://github.com/Tatsuru-Kikuchi/tokyo-taxi-ai.git
 cd tokyo-taxi-ai
-```
+\```
 
 2. **バックエンドのセットアップ**
-```bash
+\```bash
 cd backend
 npm install
+\```
 
 # 環境変数の設定 (.env ファイルを作成)
+\```
 cat > .env << EOL
 PORT=3000
 WEATHER_API_KEY=your_openweather_api_key
@@ -203,31 +205,37 @@ GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 LINE_CHANNEL_ID=your_line_channel_id
 LINE_CHANNEL_SECRET=your_line_channel_secret
 EOL
+\```
 
 # 開発サーバー起動
+\```bash
 npm run dev
-```
+\```
 
 3. **モバイルアプリのセットアップ**
-```bash
+\```bash
 cd ../mobile-app
 npm install
+\```
 
 # 設定ファイルの作成
+\```bash
 cat > config.js << EOL
 export const CONFIG = {
   BACKEND_URL: 'http://localhost:3000',
   GOOGLE_MAPS_API_KEY: 'your_google_maps_api_key',
 };
 EOL
+\```
 
 # Expo 開発サーバー起動
+\```
 npx expo start
-```
+\```
 
 ## 📊 アーキテクチャ
 
-```
+\```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │  Mobile App     │────▶│  Backend API     │────▶│  External APIs  │
 │  (React Native) │     │  (Node.js)       │     │  (Maps/Weather) │
@@ -239,7 +247,7 @@ npx expo start
 │  Local Storage  │     │  AI Models       │              
 │  (AsyncStorage) │     │  (TensorFlow.js) │              
 └─────────────────┘     └──────────────────┘              
-```
+\```
 
 ## 🔧 API エンドポイント
 
@@ -269,15 +277,17 @@ npx expo start
 
 ## 🧪 テスト
 
-```bash
 # バックエンドテスト
+\```
 cd backend
 npm test
+\```
 
 # モバイルアプリテスト
+\```
 cd mobile-app
 npm test
-```
+\```
 
 ## 📝 ドキュメント
 
