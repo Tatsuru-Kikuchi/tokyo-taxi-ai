@@ -6,23 +6,23 @@
 ## Setup Instructions
 
 ### 1. Install Dependencies
-\```bash
+\```
 npm install
 \```
 
 ### 2. Environment Variables
+\```
 Copy `.env.example` to `.env` and fill in your API keys:
-\```bash
 cp .env.example .env
 \```
 
 ### 3. Run Development Server
-\```bash
+\```
 npm run dev
 \```
 
 ### 4. Run Production Server
-\```bash
+\```
 npm start
 \```
 
@@ -70,6 +70,7 @@ npm run dev
 \```
 
 ## Security Notes
+\```
 - Never commit `.env` file
 - Never commit `serviceAccountKey.json`
 - Keep all API keys secure
@@ -184,13 +185,13 @@ AI技術を活用した次世代配車サービスアプリケーション。天
 ### インストール手順
 
 1. **リポジトリのクローン**
-\```bash
+\```
 git clone https://github.com/Tatsuru-Kikuchi/tokyo-taxi-ai.git
 cd tokyo-taxi-ai
 \```
 
 2. **バックエンドのセットアップ**
-\```bash
+\```
 cd backend
 npm install
 \```
@@ -207,18 +208,18 @@ EOL
 \```
 
 # 開発サーバー起動
-\```bash
+\```
 npm run dev
 \```
 
 3. **モバイルアプリのセットアップ**
-\```bash
+\```
 cd ../mobile-app
 npm install
 \```
 
 # 設定ファイルの作成
-\```bash
+\```
 cat > config.js << EOL
 export const CONFIG = {
   BACKEND_URL: 'http://localhost:3000',
