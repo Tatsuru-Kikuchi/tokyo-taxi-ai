@@ -1003,6 +1003,29 @@ async function initializeServer() {
 app.get("/api/trains/realtime", async (req, res) => {
   const { station } = req.query;
   const trains = await odptService.getTrainSchedule(station);
+
+// Square Payment Endpoints
+const squarePaymentService = require("./square-payment-service");
+
+app.get("/api/payment/test", (req, res) => {
+  res.json({ 
+    status: "Payment system ready",
+    environment: "sandbox",
+    locationId: "LNEWVTK44Y8KT"
+  });
+});
+
+app.post("/api/payment/credit-card", async (req, res) => {
+  try {
+    const { nonce, amount, customerId } = req.body;
+    const result = await squarePaymentService.processCreditCard(nonce, amount, customerId);
+    res.json(result);
+  } catch (error) {
+    console.error("Payment error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
   res.json({ source: "ODPT", station: station || "all", trains, timestamp: new Date().toISOString() });
 });
 
