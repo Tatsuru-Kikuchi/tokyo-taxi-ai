@@ -1052,7 +1052,6 @@ app.get("/api/trains/congestion", async (req, res) => {
 
 
 // ODPT Real-time Transport Data
-const odptService = require("./odpt-service");
 
 app.get("/api/trains/realtime", async (req, res) => {
   const trains = await odptService.getTrainSchedule(req.query.station);
