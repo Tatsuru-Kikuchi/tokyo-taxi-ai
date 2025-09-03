@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🚕 全国AIタクシー Backend
 
 ## Version
