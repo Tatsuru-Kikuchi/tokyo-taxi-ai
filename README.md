@@ -6,23 +6,23 @@
 ## Setup Instructions
 
 ### 1. Install Dependencies
-\```bat
+```bash
 npm install
-\```
+```
 
 ### 2. Environment Variables
-\```bat
+```bash
 Copy `.env.example` to `.env` and fill in your API keys:
 cp .env.example .env
-\```
+```
 
 ### 3. Run Development Server
-\```bat
+```bash
 npm run dev
-\```
+```
 
 ### 4. Run Production Server
-\```
+\```bash
 npm start
 \```
 
