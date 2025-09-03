@@ -28,7 +28,8 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "node-fetch": "^3.3.2",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "square": "^43.0.2"
   },
   "engines": {
     "node": ">=16.0.0"

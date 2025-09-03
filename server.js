@@ -445,7 +445,7 @@ const getWeatherForecast = async (region = 'tokyo') => {
   try {
     const coords = REGION_COORDINATES[region] || REGION_COORDINATES.tokyo;
 
-    if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'your_api_key_here') {
+    if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'bd17578f85cb46d681ca3e4f3bdc9963'){
       console.log('⚠️ Using mock weather data - OpenWeather API key not configured');
       return getMockWeatherData();
     }
@@ -705,12 +705,8 @@ async function sendSupportNotification(ticket) {
 // ========================================
 // API ROUTES
 // ========================================
-// Train API routes
-
 // Health check
 app.get('/api/health', (req, res) => {
-
-
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -1043,6 +1039,30 @@ app.get("/api/trains/realtime", async (req, res) => {
 app.get("/api/bus/realtime", async (req, res) => {
   const buses = await odptService.getBusSchedule(req.query.stop);
   res.json({ source: "ODPT", buses, timestamp: new Date().toISOString() });
+});
+
+
+// Square Payment Integration
+const squarePaymentService = require("./square-payment-service");
+
+app.post("/api/payment/credit-card", async (req, res) => {
+  const { nonce, amount, customerId } = req.body;
+  const result = await squarePaymentService.processCreditCard(nonce, amount, customerId);
+  res.json(result);
+});
+
+app.post("/api/payment/ic-card", async (req, res) => {
+  const { nonce, amount, customerId, cardType } = req.body;
+  const result = await squarePaymentService.processICCard(nonce, amount, customerId, cardType);
+  res.json(result);
+});
+
+app.get("/api/payment/test", (req, res) => {
+  res.json({ 
+    status: "Square payment ready",
+    environment: "sandbox",
+    locationId: "LNEWVTK44Y8KT"
+  });
 });
 
 initializeServer();
