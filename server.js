@@ -11,7 +11,6 @@ const socketIo = require('socket.io');
 // ========================================
 
 const app = express();
-const PORT = process.env.PORT || 8080;
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
@@ -19,10 +18,6 @@ const io = socketIo(server, {
     methods: ["GET", "POST"]
   }
 });
-
-app.use(express.json());
-
-app.use(express.urlencoded({ extended: true }));
 
 // Middleware
 app.use(cors({
@@ -111,7 +106,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -120,19 +115,6 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development'
   });
-});
-
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.originalUrl} not found`,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Visit: http://localhost:${PORT}`);
 });
 
 // ========================================
