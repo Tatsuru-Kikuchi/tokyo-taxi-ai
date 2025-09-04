@@ -1,0 +1,16 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "node server.js"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[variables]
+PORT = "3000"
+WEATHER_API_KEY = "bd17578f85cb46d681ca3e4f3bdc9963"
+GOOGLE_MAPS_API_KEY = "AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ"
+LINE_CHANNEL_ID = "2007928791"
+LINE_CHANNEL_SECRET = "7302c88d22457d1b79e8cd34e4f9e7e0"
+NODE_ENV = "production"
+LINE_OA_ID = "@dhai52765howdah"
