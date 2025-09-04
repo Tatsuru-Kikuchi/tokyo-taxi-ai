@@ -7,5 +7,5 @@ cmds = ["npm install"]
 [phases.build]
 cmds = ["npm run build || echo 'No build step'"]
 
-[start]
+[phases.start]
 cmd = "node server.js"
