@@ -41,27 +41,27 @@ app.use((req, res, next) => {
 
 const bookings = [];
 const drivers = [
-  { 
-    id: 'd1', 
-    name: '田中運転手', 
-    location: { latitude: 35.6812, longitude: 139.7671 }, 
-    isOnline: true, 
+  {
+    id: 'd1',
+    name: '田中運転手',
+    location: { latitude: 35.6812, longitude: 139.7671 },
+    isOnline: true,
     rating: 4.8,
     vehicle: { type: 'sedan', plateNumber: '品川 500 あ 12-34' }
   },
-  { 
-    id: 'd2', 
-    name: '佐藤運転手', 
-    location: { latitude: 35.6896, longitude: 139.6995 }, 
-    isOnline: true, 
+  {
+    id: 'd2',
+    name: '佐藤運転手',
+    location: { latitude: 35.6896, longitude: 139.6995 },
+    isOnline: true,
     rating: 4.9,
     vehicle: { type: 'sedan', plateNumber: '品川 500 い 56-78' }
   },
-  { 
-    id: 'd3', 
-    name: '山田運転手', 
-    location: { latitude: 35.6580, longitude: 139.7016 }, 
-    isOnline: true, 
+  {
+    id: 'd3',
+    name: '山田運転手',
+    location: { latitude: 35.6580, longitude: 139.7016 },
+    isOnline: true,
     rating: 4.7,
     vehicle: { type: 'minivan', plateNumber: '品川 500 う 90-12' }
   }
@@ -83,10 +83,20 @@ const stations = [
 // ========================================
 // HEALTH CHECK & STATUS
 // ========================================
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: '全国AIタクシー Backend',
+    version: '3.0.1',
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     timestamp: new Date().toISOString(),
     service: '全国AIタクシー Backend',
     version: '3.0.1',
@@ -127,7 +137,7 @@ app.get('/api/trains/schedule', async (req, res) => {
   const now = new Date();
   const hour = now.getHours();
   const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20);
-  
+
   const trains = [
     {
       trainId: `JR_YAMANOTE_${Date.now()}_1`,
@@ -175,7 +185,7 @@ app.get('/api/trains/schedule', async (req, res) => {
       cars: 6
     }
   ];
-  
+
   res.json({
     station: station || 'tokyo',
     stationName: stations.find(s => s.id === station)?.name || '東京駅',
@@ -188,7 +198,7 @@ app.get('/api/trains/schedule', async (req, res) => {
 app.post('/api/trains/delays', async (req, res) => {
   const { stationId, lineId } = req.body;
   const hasDelay = Math.random() > 0.7;
-  
+
   res.json({
     hasDelay,
     delayMinutes: hasDelay ? Math.floor(Math.random() * 10) + 5 : 0,
@@ -202,7 +212,7 @@ app.post('/api/trains/delays', async (req, res) => {
 
 app.post('/api/trains/sync', async (req, res) => {
   const { userId, stationId, trainId } = req.body;
-  
+
   res.json({
     success: true,
     syncId: `SYNC_${Date.now()}`,
@@ -220,7 +230,7 @@ app.post('/api/trains/sync', async (req, res) => {
 
 app.post('/api/bookings/create', async (req, res) => {
   const { pickup, dropoff, userId, trainSync, estimatedFare, paymentMethod } = req.body;
-  
+
   const booking = {
     id: `BK${Date.now()}`,
     userId,
@@ -236,12 +246,12 @@ app.post('/api/bookings/create', async (req, res) => {
     createdAt: new Date().toISOString(),
     confirmationNumber: `ZK${Math.random().toString(36).substring(2, 8).toUpperCase()}`
   };
-  
+
   bookings.push(booking);
-  
+
   // Emit to WebSocket clients
   io.emit('new_booking', booking);
-  
+
   res.json({
     success: true,
     booking,
@@ -251,27 +261,27 @@ app.post('/api/bookings/create', async (req, res) => {
 
 app.get('/api/bookings/:id', (req, res) => {
   const booking = bookings.find(b => b.id === req.params.id);
-  
+
   if (!booking) {
     return res.status(404).json({ error: '予約が見つかりません' });
   }
-  
+
   res.json(booking);
 });
 
 app.get('/api/bookings', (req, res) => {
   const { userId, status } = req.query;
-  
+
   let filteredBookings = bookings;
-  
+
   if (userId) {
     filteredBookings = filteredBookings.filter(b => b.userId === userId);
   }
-  
+
   if (status) {
     filteredBookings = filteredBookings.filter(b => b.status === status);
   }
-  
+
   res.json({
     bookings: filteredBookings,
     total: filteredBookings.length
@@ -281,17 +291,17 @@ app.get('/api/bookings', (req, res) => {
 app.put('/api/bookings/:id/status', (req, res) => {
   const { status } = req.body;
   const booking = bookings.find(b => b.id === req.params.id);
-  
+
   if (!booking) {
     return res.status(404).json({ error: '予約が見つかりません' });
   }
-  
+
   booking.status = status;
   booking.updatedAt = new Date().toISOString();
-  
+
   // Emit status change
   io.emit('booking_status_changed', booking);
-  
+
   res.json({
     success: true,
     booking
@@ -304,20 +314,20 @@ app.put('/api/bookings/:id/status', (req, res) => {
 
 app.get('/api/drivers/nearby', (req, res) => {
   const { lat, lng, radius } = req.query;
-  
+
   const userLat = parseFloat(lat) || 35.6812;
   const userLng = parseFloat(lng) || 139.7671;
-  
+
   // Calculate distance and ETA for each driver
   const nearbyDrivers = drivers
     .filter(d => d.isOnline)
     .map(driver => {
       // Simple distance calculation (in reality, use Haversine formula)
       const distance = Math.sqrt(
-        Math.pow(driver.location.latitude - userLat, 2) + 
+        Math.pow(driver.location.latitude - userLat, 2) +
         Math.pow(driver.location.longitude - userLng, 2)
       ) * 111000; // Convert to meters (rough approximation)
-      
+
       return {
         ...driver,
         distance: Math.round(distance),
@@ -327,7 +337,7 @@ app.get('/api/drivers/nearby', (req, res) => {
     })
     .filter(d => d.distance <= (parseInt(radius) || 2000))
     .sort((a, b) => a.distance - b.distance);
-  
+
   res.json({
     drivers: nearbyDrivers,
     total: nearbyDrivers.length,
@@ -338,7 +348,7 @@ app.get('/api/drivers/nearby', (req, res) => {
 
 app.get('/api/drivers/online', (req, res) => {
   const onlineDrivers = drivers.filter(d => d.isOnline);
-  
+
   res.json({
     drivers: onlineDrivers,
     total: onlineDrivers.length,
@@ -353,20 +363,20 @@ app.get('/api/drivers/online', (req, res) => {
 app.post('/api/drivers/:id/location', (req, res) => {
   const { latitude, longitude } = req.body;
   const driver = drivers.find(d => d.id === req.params.id);
-  
+
   if (!driver) {
     return res.status(404).json({ error: 'ドライバーが見つかりません' });
   }
-  
+
   driver.location = { latitude, longitude };
   driver.lastUpdated = new Date().toISOString();
-  
+
   // Emit location update
   io.emit('driver_location_updated', {
     driverId: driver.id,
     location: driver.location
   });
-  
+
   res.json({
     success: true,
     driver
@@ -376,20 +386,20 @@ app.post('/api/drivers/:id/location', (req, res) => {
 app.put('/api/drivers/:id/status', (req, res) => {
   const { isOnline } = req.body;
   const driver = drivers.find(d => d.id === req.params.id);
-  
+
   if (!driver) {
     return res.status(404).json({ error: 'ドライバーが見つかりません' });
   }
-  
+
   driver.isOnline = isOnline;
   driver.statusUpdatedAt = new Date().toISOString();
-  
+
   // Emit status change
   io.emit('driver_status_changed', {
     driverId: driver.id,
     isOnline: driver.isOnline
   });
-  
+
   res.json({
     success: true,
     driver
@@ -402,17 +412,17 @@ app.put('/api/drivers/:id/status', (req, res) => {
 
 app.get('/api/weather', (req, res) => {
   const { lat, lng } = req.query;
-  
+
   const weatherConditions = ['clear', 'cloudy', 'rainy', 'heavy_rain'];
   const currentWeather = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
-  
+
   const surgeMultiplier = {
     clear: 1.0,
     cloudy: 1.0,
     rainy: 1.15,
     heavy_rain: 1.30
   };
-  
+
   res.json({
     location: { lat: parseFloat(lat) || 35.6812, lng: parseFloat(lng) || 139.7671 },
     condition: currentWeather,
@@ -434,7 +444,7 @@ app.get('/api/weather', (req, res) => {
 // ========================================
 
 app.get('/api/payment/test', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'Payment system ready',
     mode: 'mock',
     environment: 'sandbox',
@@ -445,7 +455,7 @@ app.get('/api/payment/test', (req, res) => {
 
 app.post('/api/payment/credit-card', async (req, res) => {
   const { amount, customerId, bookingId } = req.body;
-  
+
   // Mock payment processing
   const payment = {
     success: true,
@@ -460,13 +470,13 @@ app.post('/api/payment/credit-card', async (req, res) => {
     receipt: `https://receipt.zenkoku-ai-taxi.jp/mock/${Date.now()}`,
     message: '支払いが完了しました（テストモード）'
   };
-  
+
   res.json(payment);
 });
 
 app.post('/api/payment/ic-card', async (req, res) => {
   const { amount, customerId, cardType, bookingId } = req.body;
-  
+
   const payment = {
     success: true,
     paymentId: `IC_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -481,13 +491,13 @@ app.post('/api/payment/ic-card', async (req, res) => {
     balance: Math.floor(Math.random() * 10000) + 1000, // Mock remaining balance
     message: `${cardType || 'ICカード'}での支払いが完了しました（テストモード）`
   };
-  
+
   res.json(payment);
 });
 
 app.post('/api/payment/calculate-fare', (req, res) => {
   const { distance, duration, surgeMultiplier } = req.body;
-  
+
   const baseFare = 730; // Initial fare
   const distanceFare = Math.ceil(distance / 237) * 90; // ¥90 per 237m
   const timeFare = Math.ceil(duration / 85) * 40; // ¥40 per 85 seconds
@@ -495,7 +505,7 @@ app.post('/api/payment/calculate-fare', (req, res) => {
   const surgeFare = Math.round(subtotal * (surgeMultiplier || 1));
   const tax = Math.round(surgeFare * 0.1);
   const total = surgeFare + tax;
-  
+
   res.json({
     breakdown: {
       baseFare,
@@ -519,17 +529,17 @@ app.post('/api/payment/calculate-fare', (req, res) => {
 
 app.get('/api/stations', (req, res) => {
   const { region, limit } = req.query;
-  
+
   let filteredStations = stations;
-  
+
   if (region) {
     filteredStations = filteredStations.filter(s => s.region === region);
   }
-  
+
   if (limit) {
     filteredStations = filteredStations.slice(0, parseInt(limit));
   }
-  
+
   res.json({
     stations: filteredStations,
     total: filteredStations.length,
@@ -539,15 +549,15 @@ app.get('/api/stations', (req, res) => {
 
 app.get('/api/stations/search', (req, res) => {
   const { q } = req.query;
-  
+
   if (!q) {
     return res.status(400).json({ error: '検索キーワードが必要です' });
   }
-  
-  const results = stations.filter(s => 
+
+  const results = stations.filter(s =>
     s.name.includes(q) || s.id.includes(q.toLowerCase())
   );
-  
+
   res.json({
     query: q,
     results,
@@ -560,19 +570,19 @@ app.get('/api/stations/nearby', (req, res) => {
   const userLat = parseFloat(lat) || 35.6812;
   const userLng = parseFloat(lng) || 139.7671;
   const maxResults = parseInt(limit) || 5;
-  
+
   const nearbyStations = stations
     .map(station => {
       const distance = Math.sqrt(
-        Math.pow(station.lat - userLat, 2) + 
+        Math.pow(station.lat - userLat, 2) +
         Math.pow(station.lng - userLng, 2)
       ) * 111000; // Convert to meters
-      
+
       return { ...station, distance: Math.round(distance) };
     })
     .sort((a, b) => a.distance - b.distance)
     .slice(0, maxResults);
-  
+
   res.json({
     stations: nearbyStations,
     total: nearbyStations.length,
@@ -588,10 +598,10 @@ app.get('/api/ai/hotspots', (req, res) => {
   const { driverId, lat, lng } = req.query;
   const now = new Date();
   const hour = now.getHours();
-  
+
   // Time-based hotspot recommendations
   let hotspots = [];
-  
+
   if (hour >= 7 && hour <= 9) {
     // Morning rush hour
     hotspots = [
@@ -621,7 +631,7 @@ app.get('/api/ai/hotspots', (req, res) => {
       { name: 'お台場', lat: 35.6251, lng: 139.7756, demand: 'low', reason: 'レジャー施設' }
     ];
   }
-  
+
   res.json({
     driverId,
     currentLocation: { lat: parseFloat(lat) || 35.6812, lng: parseFloat(lng) || 139.7671 },
@@ -634,13 +644,13 @@ app.get('/api/ai/hotspots', (req, res) => {
 app.get('/api/ai/demand-forecast', (req, res) => {
   const { region, date } = req.query;
   const targetDate = date ? new Date(date) : new Date();
-  
+
   // Generate forecast for next 24 hours
   const forecast = [];
   for (let i = 0; i < 24; i++) {
     const hour = (targetDate.getHours() + i) % 24;
     let demandLevel = 'low';
-    
+
     if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20)) {
       demandLevel = 'very_high';
     } else if ((hour >= 12 && hour <= 13) || (hour >= 22 && hour <= 23)) {
@@ -648,7 +658,7 @@ app.get('/api/ai/demand-forecast', (req, res) => {
     } else if (hour >= 10 && hour <= 16) {
       demandLevel = 'medium';
     }
-    
+
     forecast.push({
       hour,
       demandLevel,
@@ -656,7 +666,7 @@ app.get('/api/ai/demand-forecast', (req, res) => {
       surgeMultiplier: demandLevel === 'very_high' ? 1.5 : demandLevel === 'high' ? 1.2 : 1.0
     });
   }
-  
+
   res.json({
     region: region || 'tokyo',
     date: targetDate.toISOString(),
@@ -677,7 +687,7 @@ const users = [];
 
 app.post('/api/users/register', (req, res) => {
   const { name, email, phone, role } = req.body;
-  
+
   const user = {
     id: `USER_${Date.now()}`,
     name,
@@ -687,9 +697,9 @@ app.post('/api/users/register', (req, res) => {
     createdAt: new Date().toISOString(),
     isActive: true
   };
-  
+
   users.push(user);
-  
+
   res.json({
     success: true,
     user,
@@ -699,11 +709,11 @@ app.post('/api/users/register', (req, res) => {
 
 app.get('/api/users/:id', (req, res) => {
   const user = users.find(u => u.id === req.params.id);
-  
+
   if (!user) {
     return res.status(404).json({ error: 'ユーザーが見つかりません' });
   }
-  
+
   res.json(user);
 });
 
@@ -716,7 +726,7 @@ const activeConnections = new Map();
 io.on('connection', (socket) => {
   console.log('👤 Client connected:', socket.id);
   activeConnections.set(socket.id, { connectedAt: new Date(), type: 'unknown' });
-  
+
   // Join room based on user type
   socket.on('join', (data) => {
     const { userId, userType } = data;
@@ -724,14 +734,14 @@ io.on('connection', (socket) => {
     activeConnections.set(socket.id, { ...activeConnections.get(socket.id), userId, userType });
     console.log(`User ${userId} joined as ${userType}`);
   });
-  
+
   // Handle driver location updates
   socket.on('driver_location_update', (data) => {
     const driver = drivers.find(d => d.id === data.driverId);
     if (driver) {
       driver.location = data.location;
       driver.lastUpdated = new Date().toISOString();
-      
+
       // Broadcast to all customers
       socket.broadcast.to('customer').emit('driver_moved', {
         driverId: data.driverId,
@@ -739,7 +749,7 @@ io.on('connection', (socket) => {
       });
     }
   });
-  
+
   // Handle booking acceptance
   socket.on('accept_booking', (data) => {
     const booking = bookings.find(b => b.id === data.bookingId);
@@ -747,23 +757,23 @@ io.on('connection', (socket) => {
       booking.status = 'accepted';
       booking.acceptedAt = new Date().toISOString();
       booking.driverId = data.driverId;
-      
+
       // Notify customer
       io.emit('booking_accepted', booking);
     }
   });
-  
+
   // Handle ride start
   socket.on('start_ride', (data) => {
     const booking = bookings.find(b => b.id === data.bookingId);
     if (booking) {
       booking.status = 'in_progress';
       booking.startedAt = new Date().toISOString();
-      
+
       io.emit('ride_started', booking);
     }
   });
-  
+
   // Handle ride completion
   socket.on('complete_ride', (data) => {
     const booking = bookings.find(b => b.id === data.bookingId);
@@ -771,11 +781,11 @@ io.on('connection', (socket) => {
       booking.status = 'completed';
       booking.completedAt = new Date().toISOString();
       booking.actualFare = data.fare;
-      
+
       io.emit('ride_completed', booking);
     }
   });
-  
+
   // Handle disconnection
   socket.on('disconnect', () => {
     const connection = activeConnections.get(socket.id);
