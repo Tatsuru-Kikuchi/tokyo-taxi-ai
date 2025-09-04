@@ -143,23 +143,23 @@ NODE_ENV=production
 PORT=8080
 
 # API Keys
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-WEATHER_API_KEY=your_weather_api_key_here
+GOOGLE_MAPS_API_KEY=AIzaSyBq3VeVVbuM0sdmGLZN2PD5ns1xaoE3qUQ
+WEATHER_API_KEY=bd17578f85cb46d681ca3e4f3bdc9963
 
 # Payment (Square)
-SQUARE_ACCESS_TOKEN=your_square_token_here
-SQUARE_LOCATION_ID=your_square_location_id_here
+SQUARE_ACCESS_TOKEN=EAAAlyq9gGAbEBVYkjw6K6emJ0uMGzv6_pvr1VAK1zijai-oxytvuSK481nLtxkp
+SQUARE_LOCATION_ID=LNEWVTK44Y8KT
 SQUARE_ENVIRONMENT=sandbox
 
 # Firebase
 FIREBASE_SERVICE_ACCOUNT_PATH=./config/serviceAccountKey.json
 
 # LINE Integration
-LINE_CHANNEL_ID=your_line_channel_id
-LINE_CHANNEL_ACCESS_TOKEN=your_line_token
+LINE_CHANNEL_ID=2007928791
+LINE_CHANNEL_ACCESS_TOKEN=7302c88d22457d1b79e8cd34e4f9e7e0
 
 # ODPT (Train API)
-ODPT_API_KEY=your_odpt_api_key_here
+ODPT_API_KEY=pv3srzgo4tfolzf0a323n4zmsng5j1gl81yk3mwwrirfxzfxjqbsc5ki0byh0xn6
 EOF
 echo "✅ .env.example created"
 echo ""
@@ -173,7 +173,7 @@ if [ -f "server.js" ]; then
         -e "s|require('./odpt-service')|require('./services/odpt-service')|g" \
         -e "s|require('./tokyo-stations')|require('./data/tokyo-stations')|g" \
         server.js > server.js.tmp
-    
+
     mv server.js.tmp server.js
     echo "✅ Updated import paths in server.js"
 else
@@ -285,19 +285,19 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     echo ""
     echo "Installing dependencies..."
     npm install
-    
+
     echo ""
     echo "Starting server for testing..."
     echo "Server will run for 10 seconds then stop automatically..."
     echo ""
-    
+
     # Start server in background
     npm start &
     SERVER_PID=$!
-    
+
     # Wait a bit for server to start
     sleep 3
-    
+
     # Test health endpoint
     echo ""
     echo "Testing health endpoint..."
@@ -305,13 +305,13 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
         echo "✅ Server is running!"
         curl -s http://localhost:8080/health | python -m json.tool 2>/dev/null || curl -s http://localhost:8080/health
     else
-        echo "⚠️  Server might still be starting..."
+        echo "Server might still be starting..."
     fi
-    
+
     # Kill the server after a few seconds
     sleep 5
     kill $SERVER_PID 2>/dev/null
-    
+
     echo ""
     echo "✅ Server test complete!"
 fi
