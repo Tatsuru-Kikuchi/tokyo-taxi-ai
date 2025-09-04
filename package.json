@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "echo 'No build required'"
+    "build": "echo 'No build required'",
     "test": "echo \"Test mode\" && exit 0",
     "clean": "rm -rf node_modules package-lock.json && npm install"
   },
