@@ -111,7 +111,7 @@ app.get('/', (req, res) => {
     status: 'operational',
     version: '3.0.1',
     endpoints: {
-      health: '/health',
+      health: '/api/health',
       bookings: '/api/bookings',
       drivers: '/api/drivers/nearby',
       trains: '/api/trains/schedule',
