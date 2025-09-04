@@ -88,28 +88,6 @@ const stations = [
 // ========================================
 // HEALTH CHECK & STATUS
 // ========================================
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: '全国AIタクシー Backend',
-    version: '3.0.1',
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: '全国AIタクシー Backend',
-    version: '3.0.1',
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
 app.get('/', (req, res) => {
   res.json({
     service: '🚕 全国AIタクシー API',
@@ -130,6 +108,17 @@ app.get('/', (req, res) => {
       totalBookings: bookings.length
     },
     timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: '全国AIタクシー Backend',
+    version: '3.0.1',
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
