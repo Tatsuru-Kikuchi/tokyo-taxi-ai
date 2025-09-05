@@ -217,7 +217,7 @@ app.post('/api/trains/sync', async (req, res) => {
 // ========================================
 // Serve admin panel
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
+  res.sendFile(path.join(__dirname, './admin.html'));
 });
 
 // Admin stats endpoint
@@ -228,8 +228,8 @@ app.get('/api/admin/stats', (req, res) => {
   let revenue = 0;
 
   try {
-    if (fs.existsSync('bookings.json')) {
-      const bookings = fs.readFileSync('bookings.json', 'utf8')
+    if (fs.existsSync('./routes/bookings.json')) {
+      const bookings = fs.readFileSync('./routes/bookings.json', 'utf8')
         .split('\n')
         .filter(line => line)
         .map(line => JSON.parse(line));
@@ -259,7 +259,7 @@ app.post('/api/bookings/create', async (req, res) => {
 
   // Save to a simple JSON file for now
   const fs = require('fs');
-  fs.appendFileSync('bookings.json', JSON.stringify(booking) + '\n');
+  fs.appendFileSync('./routes/bookings.json', JSON.stringify(booking) + '\n');
 
   res.json({ success: true, booking });
 });
