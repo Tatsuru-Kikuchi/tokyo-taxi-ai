@@ -120,7 +120,6 @@ app.get('/api/health', (req, res) => {
 // ========================================
 // TRAIN API ENDPOINTS
 // ========================================
-
 app.get('/api/trains/schedule', async (req, res) => {
   const { station } = req.query;
   const now = new Date();
@@ -216,36 +215,53 @@ app.post('/api/trains/sync', async (req, res) => {
 // ========================================
 // BOOKING ENDPOINTS
 // ========================================
+// Serve admin panel
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
 
-app.post('/api/bookings/create', async (req, res) => {
-  const { pickup, dropoff, userId, trainSync, estimatedFare, paymentMethod } = req.body;
+// Admin stats endpoint
+app.get('/api/admin/stats', (req, res) => {
+  // Read bookings from file or database
+  const fs = require('fs');
+  let bookingCount = 0;
+  let revenue = 0;
 
-  const booking = {
-    id: `BK${Date.now()}`,
-    userId,
-    pickup,
-    dropoff,
-    trainSync: trainSync || false,
-    status: 'confirmed',
-    driver: drivers[Math.floor(Math.random() * drivers.length)],
-    estimatedFare: estimatedFare || 2800,
-    actualFare: null,
-    paymentMethod: paymentMethod || 'cash',
-    estimatedArrival: new Date(Date.now() + 5 * 60000).toISOString(), // 5 minutes
-    createdAt: new Date().toISOString(),
-    confirmationNumber: `ZK${Math.random().toString(36).substring(2, 8).toUpperCase()}`
-  };
+  try {
+    if (fs.existsSync('bookings.json')) {
+      const bookings = fs.readFileSync('bookings.json', 'utf8')
+        .split('\n')
+        .filter(line => line)
+        .map(line => JSON.parse(line));
 
-  bookings.push(booking);
-
-  // Emit to WebSocket clients
-  io.emit('new_booking', booking);
+      bookingCount = bookings.length;
+      revenue = bookings.reduce((sum, b) => sum + (b.estimatedFare || 0), 0);
+    }
+  } catch (error) {
+    console.error('Error reading bookings:', error);
+  }
 
   res.json({
-    success: true,
-    booking,
-    message: '予約が確定しました'
+    bookingCount,
+    driverCount: 3, // Mock for now
+    revenue,
+    timestamp: new Date()
   });
+});
+
+app.post('/api/bookings/create', async (req, res) => {
+  const booking = {
+    id: 'BK' + Date.now(),
+    ...req.body,
+    createdAt: new Date(),
+    status: 'pending'
+  };
+
+  // Save to a simple JSON file for now
+  const fs = require('fs');
+  fs.appendFileSync('bookings.json', JSON.stringify(booking) + '\n');
+
+  res.json({ success: true, booking });
 });
 
 app.get('/api/bookings/:id', (req, res) => {
