@@ -2,3 +2,8 @@ ios/
 android/
 ios/
 android/
+
+# Expo
+.expo
+dist/
+web-build/

@@ -1,965 +1,823 @@
+// 🚕 全国AIタクシー Backend - Production Server
+// Version 3.0.1 - Latest Stable Release
+
 const express = require('express');
 const cors = require('cors');
-const { WebSocketServer } = require('ws');
 const http = require('http');
-const admin = require('firebase-admin');
-
-// ========================================
-// CRASH PREVENTION: Process-level error handlers
-// ========================================
-
-process.on('uncaughtException', (error) => {
-  console.error('🚨 UNCAUGHT EXCEPTION:', error);
-  console.error('Stack:', error.stack);
-
-  logToExternalService('uncaughtException', error);
-
-  if (!isOperationalError(error)) {
-    console.error('💀 Non-operational error detected. Shutting down gracefully...');
-    gracefulShutdown();
-  }
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('🚨 UNHANDLED PROMISE REJECTION:', reason);
-  console.error('Promise:', promise);
-
-  logToExternalService('unhandledRejection', reason);
-  throw new Error(`Unhandled Rejection: ${reason}`);
-});
-
-process.on('SIGTERM', () => {
-  console.log('📴 SIGTERM received. Starting graceful shutdown...');
-  gracefulShutdown();
-});
-
-process.on('SIGINT', () => {
-  console.log('📴 SIGINT received. Starting graceful shutdown...');
-  gracefulShutdown();
-});
-
-// ========================================
-// ERROR HANDLING UTILITIES
-// ========================================
-
-function isOperationalError(error) {
-  const operationalErrors = [
-    'ECONNREFUSED',
-    'ENOTFOUND',
-    'ETIMEDOUT',
-    'ValidationError',
-    'CastError'
-  ];
-
-  return operationalErrors.some(opError =>
-    error.code === opError ||
-    error.name === opError ||
-    error.message.includes(opError)
-  );
-}
-
-function logToExternalService(type, error) {
-  const logData = {
-    type,
-    message: error.message || error,
-    stack: error.stack,
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  };
-
-  console.log('📝 ERROR LOG:', JSON.stringify(logData, null, 2));
-
-  if (type === 'uncaughtException') {
-    sendLINEAlert(logData);
-  }
-}
-
-async function sendLINEAlert(errorData) {
-  try {
-    const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const LINE_DEVELOPER_USER_ID = process.env.LINE_DEVELOPER_USER_ID;
-
-    if (!LINE_CHANNEL_ACCESS_TOKEN || !LINE_DEVELOPER_USER_ID) {
-      console.log('⚠️ LINE alert not configured');
-      return;
-    }
-
-    const message = `🚨 CRITICAL ERROR\n\n` +
-                   `Type: ${errorData.type}\n` +
-                   `Message: ${errorData.message}\n` +
-                   `Time: ${errorData.timestamp}\n` +
-                   `Environment: ${errorData.environment}`;
-
-    const response = await fetch('https://api.line.me/v2/bot/message/push', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
-      },
-      body: JSON.stringify({
-        to: LINE_DEVELOPER_USER_ID,
-        messages: [{
-          type: 'text',
-          text: message
-        }]
-      })
-    });
-
-    if (response.ok) {
-      console.log('✅ LINE alert sent successfully');
-    }
-  } catch (alertError) {
-    console.error('❌ Failed to send LINE alert:', alertError);
-  }
-}
-
-function gracefulShutdown() {
-  setTimeout(() => {
-    console.log('💀 Force shutdown after timeout');
-    process.exit(1);
-  }, 10000);
-
-  if (server) {
-    server.close(() => {
-      console.log('📴 HTTP server closed');
-
-      if (firestore) {
-        console.log('📴 Firestore connections closed');
-      }
-
-      process.exit(0);
-    });
-  } else {
-    process.exit(1);
-  }
-}
-
-// ========================================
-// FIREBASE INITIALIZATION
-// ========================================
-
-let firestore;
-async function initializeFirebase() {
-  try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id
-      });
-      console.log('✅ Firebase initialized with environment variable');
-    } else {
-      console.log('⚠️ Firebase service account not found in environment');
-    }
-    firestore = admin.firestore();
-    console.log('✅ Firestore connected');
-  } catch (error) {
-    console.error('❌ Firebase initialization error:', error.message);
-    logToExternalService('firebase_init_error', error);
-  }
-}
-
-// ========================================
-// STATION DATA IMPORT
-// ========================================
-
-let stationImports;
-try {
-  stationImports = require('./japan-stations');
-  console.log('✅ Station data imported successfully');
-} catch (importError) {
-  console.error('❌ Failed to import station data:', importError);
-  logToExternalService('import_error', importError);
-  stationImports = {
-    ALL_JAPAN_STATIONS: [],
-    REGIONS: {},
-    getStationsByRegion: () => [],
-    getRegionByCoordinates: () => 'tokyo',
-    getNearbyStations: () => []
-  };
-}
-
-const {
-  ALL_JAPAN_STATIONS,
-  REGIONS,
-  getStationsByRegion,
-  getRegionByCoordinates,
-  getNearbyStations
-} = stationImports;
+const socketIo = require('socket.io');
+const path = require('path');
+const fs = require('fs');
 
 // ========================================
 // EXPRESS APP SETUP
 // ========================================
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
-function asyncHandler(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
-function timeoutMiddleware(timeout = 30000) {
-  return (req, res, next) => {
-    res.setTimeout(timeout, () => {
-      console.error(`⏰ Request timeout: ${req.method} ${req.url}`);
-      if (!res.headersSent) {
-        res.status(408).json({ error: 'Request timeout' });
-      }
-    });
-    next();
-  };
-}
-
-// Enhanced CORS
+// Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
-    : '*',
+  origin: "*",
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: false
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
-
-// Request parsing with limits
-app.use(express.json({
-  limit: process.env.MAX_REQUEST_SIZE || '10mb',
-  strict: true,
-  type: 'application/json'
-}));
-
-app.use(express.urlencoded({
-  extended: true,
-  limit: process.env.MAX_REQUEST_SIZE || '10mb'
-}));
-
-// Request timeout
-app.use(timeoutMiddleware(parseInt(process.env.REQUEST_TIMEOUT) || 30000));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging
 app.use((req, res, next) => {
-  const start = Date.now();
-  console.log(`📨 ${req.method} ${req.url} - ${req.ip}`);
-
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    console.log(`📤 ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
-  });
-
+  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
 // ========================================
-// HTTP & WEBSOCKET SERVER SETUP
+// IN-MEMORY DATA STORAGE
 // ========================================
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({
-  server,
-  perMessageDeflate: false
-});
-
-// In-memory storage with limits
-const MAX_STORAGE_SIZE = 10000;
-let users = [];
-let drivers = [];
-let rides = [];
-let rideRequests = [];
-
-// Enhanced WebSocket handling
-wss.on('connection', (ws, req) => {
-  console.log('📱 Client connected from:', req.socket.remoteAddress);
-
-  const connectionTimeout = setTimeout(() => {
-    if (ws.readyState === ws.OPEN) {
-      ws.close(4000, 'Connection timeout');
-    }
-  }, parseInt(process.env.CONNECTION_TIMEOUT) || 300000);
-
-  ws.on('message', (message) => {
-    try {
-      clearTimeout(connectionTimeout);
-
-      const data = JSON.parse(message);
-      console.log('📨 Received:', data.type);
-
-      switch (data.type) {
-        case 'driver_online':
-          handleDriverOnline(data, ws);
-          break;
-        case 'driver_offline':
-          handleDriverOffline(data);
-          break;
-        case 'location_update':
-          handleLocationUpdate(data);
-          break;
-        case 'ping':
-          ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-        default:
-          console.warn('Unknown message type:', data.type);
-      }
-    } catch (error) {
-      console.error('❌ WebSocket message error:', error);
-      logToExternalService('websocket_error', error);
-
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Invalid message format'
-        }));
-      }
-    }
-  });
-
-  ws.on('error', (error) => {
-    console.error('❌ WebSocket error:', error);
-    logToExternalService('websocket_connection_error', error);
-  });
-
-  ws.on('close', (code, reason) => {
-    console.log(`📱 Client disconnected: ${code} ${reason}`);
-    clearTimeout(connectionTimeout);
-    drivers = drivers.filter(d => d.ws !== ws);
-  });
-
-  if (ws.readyState === ws.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'welcome',
-      message: 'Connected to 全国AIタクシー backend',
-      timestamp: new Date().toISOString()
-    }));
+const bookings = [];
+const drivers = [
+  {
+    id: 'd1',
+    name: '田中運転手',
+    location: { latitude: 35.6812, longitude: 139.7671 },
+    isOnline: true,
+    rating: 4.8,
+    vehicle: { type: 'sedan', plateNumber: '品川 500 あ 12-34' }
+  },
+  {
+    id: 'd2',
+    name: '佐藤運転手',
+    location: { latitude: 35.6896, longitude: 139.6995 },
+    isOnline: true,
+    rating: 4.9,
+    vehicle: { type: 'sedan', plateNumber: '品川 500 い 56-78' }
+  },
+  {
+    id: 'd3',
+    name: '山田運転手',
+    location: { latitude: 35.6580, longitude: 139.7016 },
+    isOnline: true,
+    rating: 4.7,
+    vehicle: { type: 'minivan', plateNumber: '品川 500 う 90-12' }
   }
-});
+];
 
-// WebSocket helper functions
-function handleDriverOnline(data, ws) {
-  try {
-    if (!data.driverId || !data.driverName) {
-      throw new Error('Driver ID and name required');
-    }
-
-    const driver = {
-      id: data.driverId,
-      name: data.driverName,
-      location: data.location,
-      isOnline: true,
-      ws: ws,
-      connectedAt: new Date().toISOString()
-    };
-
-    drivers = drivers.filter(d => d.id !== data.driverId);
-
-    if (drivers.length >= MAX_STORAGE_SIZE) {
-      drivers = drivers.slice(-MAX_STORAGE_SIZE + 1);
-    }
-
-    drivers.push(driver);
-    console.log(`🚕 Driver ${data.driverName} is online`);
-  } catch (error) {
-    console.error('❌ Error handling driver online:', error);
-    logToExternalService('driver_online_error', error);
-  }
-}
-
-function handleDriverOffline(data) {
-  try {
-    drivers = drivers.filter(d => d.id !== data.driverId);
-    console.log(`🚕 Driver ${data.driverId} went offline`);
-  } catch (error) {
-    console.error('❌ Error handling driver offline:', error);
-    logToExternalService('driver_offline_error', error);
-  }
-}
-
-function handleLocationUpdate(data) {
-  try {
-    const driverIndex = drivers.findIndex(d => d.id === data.driverId);
-    if (driverIndex !== -1) {
-      drivers[driverIndex].location = data.location;
-      drivers[driverIndex].lastLocationUpdate = new Date().toISOString();
-    }
-  } catch (error) {
-    console.error('❌ Error handling location update:', error);
-    logToExternalService('location_update_error', error);
-  }
-}
+const stations = [
+  { id: 'tokyo', name: '東京駅', region: 'tokyo', lat: 35.6812, lng: 139.7671 },
+  { id: 'shinjuku', name: '新宿駅', region: 'tokyo', lat: 35.6896, lng: 139.6995 },
+  { id: 'shibuya', name: '渋谷駅', region: 'tokyo', lat: 35.6580, lng: 139.7016 },
+  { id: 'ikebukuro', name: '池袋駅', region: 'tokyo', lat: 35.7295, lng: 139.7109 },
+  { id: 'shinagawa', name: '品川駅', region: 'tokyo', lat: 35.6284, lng: 139.7387 },
+  { id: 'ueno', name: '上野駅', region: 'tokyo', lat: 35.7141, lng: 139.7774 },
+  { id: 'osaka', name: '大阪駅', region: 'osaka', lat: 34.7024, lng: 135.4959 },
+  { id: 'kyoto', name: '京都駅', region: 'kyoto', lat: 34.9859, lng: 135.7585 },
+  { id: 'yokohama', name: '横浜駅', region: 'kanagawa', lat: 35.4657, lng: 139.6222 },
+  { id: 'nagoya', name: '名古屋駅', region: 'aichi', lat: 35.1709, lng: 136.8815 }
+];
 
 // ========================================
-// WEATHER API WITH RETRY LOGIC
+// HEALTH CHECK & STATUS
 // ========================================
-
-const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'bd17578f85cb46d681ca3e4f3bdc9963';
-const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
-
-// LINE Configuration
-const LINE_OA_ID = process.env.LINE_OA_ID || '@dhai52765howdah';
-
-const REGION_COORDINATES = {
-  tokyo: { lat: 35.6762, lon: 139.6503 },
-  osaka: { lat: 34.6937, lon: 135.5023 },
-  nagoya: { lat: 35.1815, lon: 136.9066 },
-  kyoto: { lat: 35.0116, lon: 135.7681 },
-  fukuoka: { lat: 33.5904, lon: 130.4017 },
-  sapporo: { lat: 43.0642, lon: 141.3469 },
-  sendai: { lat: 38.2682, lon: 140.8694 },
-  hiroshima: { lat: 34.3853, lon: 132.4553 }
-};
-
-async function fetchWithRetry(url, options = {}, maxRetries = 3) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      return response;
-    } catch (error) {
-      console.error(`❌ Fetch attempt ${attempt} failed:`, error.message);
-
-      if (attempt === maxRetries) {
-        throw error;
-      }
-
-      const delay = Math.pow(2, attempt) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-}
-
-const getWeatherForecast = async (region = 'tokyo') => {
-  try {
-    const coords = REGION_COORDINATES[region] || REGION_COORDINATES.tokyo;
-
-    if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY === 'your_api_key_here') {
-      console.log('⚠️ Using mock weather data - OpenWeather API key not configured');
-      return getMockWeatherData();
-    }
-
-    const currentResponse = await fetchWithRetry(
-      `${OPENWEATHER_BASE_URL}/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
-    );
-
-    const forecastResponse = await fetchWithRetry(
-      `${OPENWEATHER_BASE_URL}/forecast?lat=${coords.lat}&lon=${coords.lon}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=ja`
-    );
-
-    const currentData = await currentResponse.json();
-    const forecastData = await forecastResponse.json();
-
-    const convertCondition = (weather) => {
-      if (!weather || !weather.main) return 'partly_cloudy';
-
-      const main = weather.main.toLowerCase();
-      if (main.includes('rain')) return 'rainy';
-      if (main.includes('cloud')) return 'cloudy';
-      if (main.includes('clear')) return 'sunny';
-      return 'partly_cloudy';
-    };
-
-    return {
-      current: {
-        condition: convertCondition(currentData.weather[0]),
-        temperature: Math.round(currentData.main.temp),
-        humidity: currentData.main.humidity,
-        windSpeed: Math.round(currentData.wind?.speed || 0),
-        description: currentData.weather[0].description,
-        city: currentData.name
-      },
-      forecast: forecastData.list.slice(0, 24).map(item => ({
-        hour: new Date(item.dt * 1000).getHours(),
-        condition: convertCondition(item.weather[0]),
-        temperature: Math.round(item.main.temp),
-        rainProbability: Math.round((item.pop || 0) * 100),
-        description: item.weather[0].description
-      }))
-    };
-
-  } catch (error) {
-    console.error('❌ Weather API error:', error.message);
-    logToExternalService('weather_api_error', error);
-    return getMockWeatherData();
-  }
-};
-
-const getMockWeatherData = () => {
-  const weatherConditions = ['sunny', 'cloudy', 'rainy', 'partly_cloudy'];
-  const temperatures = [15, 18, 22, 25, 28, 30];
-
-  return {
-    current: {
-      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
-      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
-      humidity: Math.floor(Math.random() * 40) + 40,
-      windSpeed: Math.floor(Math.random() * 15) + 5,
-      description: 'Mock weather data',
-      city: 'Mock City'
+app.get('/', (req, res) => {
+  res.json({
+    service: '🚕 全国AIタクシー API',
+    status: 'operational',
+    version: '3.0.1',
+    endpoints: {
+      health: '/api/health',
+      bookings: '/api/bookings',
+      drivers: '/api/drivers/nearby',
+      trains: '/api/trains/schedule',
+      weather: '/api/weather',
+      payment: '/api/payment/test',
+      stations: '/api/stations'
     },
-    forecast: Array.from({ length: 24 }, (_, i) => ({
-      hour: (new Date().getHours() + i) % 24,
-      condition: weatherConditions[Math.floor(Math.random() * weatherConditions.length)],
-      temperature: temperatures[Math.floor(Math.random() * temperatures.length)],
-      rainProbability: Math.floor(Math.random() * 100),
-      description: 'Mock forecast'
-    }))
-  };
-};
+    stats: {
+      totalStations: stations.length,
+      onlineDrivers: drivers.filter(d => d.isOnline).length,
+      totalBookings: bookings.length
+    },
+    timestamp: new Date().toISOString()
+  });
+});
 
-// ========================================
-// AI HELPER FUNCTIONS
-// ========================================
-
-const calculateDemandLevel = (stationId, hour, weatherCondition) => {
-  try {
-    const station = ALL_JAPAN_STATIONS.find(s => s.id === stationId);
-    if (!station) return 'low';
-
-    let demandScore = 0;
-
-    const demandLevels = {
-      'very_high': 4,
-      'high': 3,
-      'medium': 2,
-      'low': 1
-    };
-    demandScore += demandLevels[station.demandLevel] || 1;
-
-    if (station.peakHours && station.peakHours.includes(hour)) {
-      demandScore += 2;
-    }
-
-    if (weatherCondition === 'rainy' && station.weatherSensitive) {
-      demandScore += 2;
-    }
-
-    if (station.category === 'major_hub') demandScore += 1;
-    if (station.category === 'airport') demandScore += 3;
-
-    if (demandScore >= 6) return 'very_high';
-    if (demandScore >= 4) return 'high';
-    if (demandScore >= 2) return 'medium';
-    return 'low';
-  } catch (error) {
-    console.error('❌ Error calculating demand level:', error);
-    logToExternalService('demand_calculation_error', error);
-    return 'low';
-  }
-};
-
-const generateAIRecommendations = async (lat, lon, hour, weather) => {
-  try {
-    const region = getRegionByCoordinates(lat, lon);
-    const regionData = REGIONS[region];
-    const nearbyStations = getNearbyStations(lat, lon, 0.05);
-
-    const recommendations = [];
-
-    if (weather.current.condition === 'rainy') {
-      const rainStations = nearbyStations.filter(s => s.weatherSensitive);
-      if (rainStations.length > 0) {
-        recommendations.push({
-          type: 'weather',
-          message: `雨のため${rainStations[0].name}周辺の需要が増加中`,
-          priority: 'high',
-          stations: rainStations.slice(0, 2).map(s => s.id)
-        });
-      }
-    }
-
-    const peakStations = nearbyStations.filter(s =>
-      s.peakHours && s.peakHours.includes(hour)
-    );
-    if (peakStations.length > 0) {
-      recommendations.push({
-        type: 'peak_hours',
-        message: `${hour}:00の需要ピークに備えて${peakStations[0].name}エリアへ`,
-        priority: 'medium',
-        stations: peakStations.slice(0, 2).map(s => s.id)
-      });
-    }
-
-    const highDemandStations = nearbyStations.filter(s =>
-      calculateDemandLevel(s.id, hour, weather.current.condition) === 'very_high'
-    );
-
-    if (highDemandStations.length > 0) {
-      recommendations.push({
-        type: 'high_demand',
-        message: `${highDemandStations[0].name}は現在高需要エリアです`,
-        priority: 'high',
-        stations: highDemandStations.slice(0, 3).map(s => s.id)
-      });
-    }
-
-    return {
-      region: regionData?.name || '未対応地域',
-      prefecture: regionData?.name || '未対応',
-      recommendations: recommendations.slice(0, 3),
-      coverage: 'nationwide'
-    };
-  } catch (error) {
-    console.error('❌ Error generating AI recommendations:', error);
-    logToExternalService('ai_recommendations_error', error);
-    return {
-      region: '未対応地域',
-      prefecture: '未対応',
-      recommendations: [],
-      coverage: 'nationwide'
-    };
-  }
-};
-
-// ========================================
-// LINE INTEGRATION FUNCTIONS
-// ========================================
-
-async function handleLINEMessage(event) {
-  try {
-    const message = event.message.text;
-    const userId = event.source.userId;
-
-    let response = '申し訳ございませんが、現在サポートスタッフが対応中です。しばらくお待ちください。';
-
-    if (message.includes('アプリ') || message.includes('起動')) {
-      response = 'アプリの問題について承りました。アプリを再起動して、問題が解決しない場合は詳細をお聞かせください。';
-    } else if (message.includes('配車') || message.includes('タクシー')) {
-      response = '配車に関するお問い合わせありがとうございます。現在の状況を確認いたします。';
-    }
-
-    await sendLINEResponse(userId, response);
-
-  } catch (error) {
-    console.error('❌ Error handling LINE message:', error);
-    logToExternalService('line_message_error', error);
-  }
-}
-
-async function sendLINEResponse(userId, message) {
-  try {
-    const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-
-    if (!LINE_CHANNEL_ACCESS_TOKEN) {
-      console.log('⚠️ LINE Channel Access Token not configured');
-      return;
-    }
-
-    await fetchWithRetry('https://api.line.me/v2/bot/message/push', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
-      },
-      body: JSON.stringify({
-        to: userId,
-        messages: [{
-          type: 'text',
-          text: message
-        }]
-      })
-    });
-
-    console.log('✅ LINE response sent successfully');
-  } catch (error) {
-    console.error('❌ Failed to send LINE response:', error);
-    logToExternalService('line_response_error', error);
-  }
-}
-
-async function sendSupportNotification(ticket) {
-  try {
-    const SUPPORT_LINE_USER_ID = process.env.SUPPORT_LINE_USER_ID;
-
-    if (!SUPPORT_LINE_USER_ID) {
-      console.log('⚠️ Support LINE notification not configured');
-      return;
-    }
-
-    const message = `🎫 新規サポートチケット\n\n` +
-                   `ID: ${ticket.id}\n` +
-                   `ユーザー: ${ticket.userType}\n` +
-                   `カテゴリ: ${ticket.category}\n` +
-                   `メッセージ: ${ticket.message}\n` +
-                   `時刻: ${ticket.createdAt}`;
-
-    await sendLINEResponse(SUPPORT_LINE_USER_ID, message);
-  } catch (error) {
-    console.error('❌ Failed to send support notification:', error);
-    logToExternalService('support_notification_error', error);
-  }
-}
-
-// ========================================
-// API ROUTES
-// ========================================
-
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    coverage: 'nationwide',
-    supportedRegions: Object.keys(REGIONS).length,
-    totalStations: ALL_JAPAN_STATIONS.length,
-    firebase: firestore ? 'connected' : 'disconnected',
-    activeDrivers: drivers.filter(d => d.isOnline).length,
-    memory: process.memoryUsage(),
-    uptime: process.uptime()
+    service: '全国AIタクシー Backend',
+    version: '3.0.1',
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Get support configuration (for mobile app)
-app.get('/api/support/config', (req, res) => {
+// ========================================
+// TRAIN API ENDPOINTS
+// ========================================
+app.get('/api/trains/schedule', async (req, res) => {
+  const { station } = req.query;
+  const now = new Date();
+  const hour = now.getHours();
+  const isRushHour = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20);
+
+  const trains = [
+    {
+      trainId: `JR_YAMANOTE_${Date.now()}_1`,
+      lineName: '山手線',
+      lineColor: '#9ACD32',
+      destination: '品川・渋谷方面',
+      platform: '2番線',
+      arrivalMinutes: 3,
+      status: 'on_time',
+      crowdLevel: isRushHour ? 'high' : 'medium',
+      cars: 11
+    },
+    {
+      trainId: `JR_CHUO_${Date.now()}_2`,
+      lineName: '中央線',
+      lineColor: '#FFA500',
+      destination: '新宿方面',
+      platform: '7番線',
+      arrivalMinutes: 5,
+      status: isRushHour ? 'delayed' : 'on_time',
+      delayMinutes: isRushHour ? 3 : 0,
+      crowdLevel: isRushHour ? 'very_high' : 'low',
+      cars: 10
+    },
+    {
+      trainId: `JR_KEIHIN_${Date.now()}_3`,
+      lineName: '京浜東北線',
+      lineColor: '#00BFFF',
+      destination: '大宮方面',
+      platform: '3番線',
+      arrivalMinutes: 7,
+      status: 'on_time',
+      crowdLevel: 'medium',
+      cars: 10
+    },
+    {
+      trainId: `TOKYO_METRO_${Date.now()}_4`,
+      lineName: '丸ノ内線',
+      lineColor: '#FF0000',
+      destination: '荻窪方面',
+      platform: 'M1番線',
+      arrivalMinutes: 2,
+      status: 'on_time',
+      crowdLevel: isRushHour ? 'high' : 'low',
+      cars: 6
+    }
+  ];
+
   res.json({
-    lineOAID: LINE_OA_ID,
-    supportEmail: 'support@zenkoku-ai-taxi.jp',
-    emergencyPhone: '050-1234-5678',
-    supportAvailable24x7: true,
-    languages: ['japanese', 'english']
+    station: station || 'tokyo',
+    stationName: stations.find(s => s.id === station)?.name || '東京駅',
+    trains: trains,
+    isRushHour: isRushHour,
+    timestamp: now.toISOString()
   });
 });
 
-// Get all stations
-app.get('/api/stations', asyncHandler(async (req, res) => {
-  const { region, category, limit } = req.query;
-  let stations = ALL_JAPAN_STATIONS;
-
-  if (region) {
-    stations = getStationsByRegion(region);
-  }
-
-  if (category) {
-    stations = stations.filter(s => s.category === category);
-  }
-
-  if (limit) {
-    const limitNum = parseInt(limit);
-    if (isNaN(limitNum) || limitNum < 0) {
-      return res.status(400).json({ error: 'Invalid limit parameter' });
-    }
-    stations = stations.slice(0, limitNum);
-  }
+app.post('/api/trains/delays', async (req, res) => {
+  const { stationId, lineId } = req.body;
+  const hasDelay = Math.random() > 0.7;
 
   res.json({
-    stations,
-    total: stations.length,
-    regions: Object.keys(REGIONS)
-  });
-}));
-
-// Get nearby stations with regional support
-app.get('/api/stations/nearby-regional', asyncHandler(async (req, res) => {
-  const { lat, lon, radius = 0.1 } = req.query;
-
-  if (!lat || !lon) {
-    return res.status(400).json({ error: 'Latitude and longitude required' });
-  }
-
-  const latitude = parseFloat(lat);
-  const longitude = parseFloat(lon);
-  const searchRadius = parseFloat(radius);
-
-  const detectedRegion = getRegionByCoordinates(latitude, longitude);
-  const regionData = REGIONS[detectedRegion];
-  const nearbyStations = getNearbyStations(latitude, longitude, searchRadius);
-
-  res.json({
-    detectedRegion,
-    prefecture: regionData?.name || '未対応地域',
-    coordinates: { lat: latitude, lon: longitude },
-    radius: searchRadius,
-    stations: nearbyStations,
-    total: nearbyStations.length
-  });
-}));
-
-// Get regional weather forecast
-app.get('/api/weather/forecast-regional', asyncHandler(async (req, res) => {
-  const { region = 'tokyo' } = req.query;
-  const regionData = REGIONS[region];
-
-  if (!regionData) {
-    return res.status(404).json({ error: 'Region not supported' });
-  }
-
-  const weather = await getWeatherForecast(region);
-
-  res.json({
-    region: regionData.name,
-    location: regionData.nameEn,
-    weather,
+    hasDelay,
+    delayMinutes: hasDelay ? Math.floor(Math.random() * 10) + 5 : 0,
+    reason: hasDelay ? '混雑のため' : null,
+    affectedLines: hasDelay ? [lineId] : [],
+    recommendation: hasDelay ? 'タクシー利用をお勧めします' : null,
+    alternativeRoutes: hasDelay ? ['都営バス', 'タクシー'] : [],
     timestamp: new Date().toISOString()
   });
-}));
+});
 
-// Get AI recommendations with regional support
-app.get('/api/recommendations/regional', asyncHandler(async (req, res) => {
-  const { lat, lon, hour } = req.query;
-
-  if (!lat || !lon) {
-    return res.status(400).json({ error: 'Latitude and longitude required' });
-  }
-
-  const latitude = parseFloat(lat);
-  const longitude = parseFloat(lon);
-  const currentHour = hour ? parseInt(hour) : new Date().getHours();
-
-  const region = getRegionByCoordinates(latitude, longitude);
-  const weather = await getWeatherForecast(region);
-  const recommendations = await generateAIRecommendations(latitude, longitude, currentHour, weather);
-
-  res.json({
-    location: { lat: latitude, lon: longitude },
-    hour: currentHour,
-    weather: weather.current,
-    ...recommendations,
-    timestamp: new Date().toISOString()
-  });
-}));
-
-// LINE webhook
-app.post('/api/line/webhook', asyncHandler(async (req, res) => {
-  const events = req.body.events || [];
-
-  for (const event of events) {
-    if (event.type === 'message' && event.message.type === 'text') {
-      await handleLINEMessage(event);
-    }
-  }
-
-  res.status(200).send('OK');
-}));
-
-// Support ticket creation
-app.post('/api/support/ticket', asyncHandler(async (req, res) => {
-  const { userId, userType, message, category, location } = req.body;
-
-  if (!userId || !message) {
-    return res.status(400).json({ error: 'User ID and message required' });
-  }
-
-  const ticket = {
-    id: Date.now().toString(),
-    userId,
-    userType: userType || 'customer',
-    message,
-    category: category || 'general',
-    location,
-    status: 'open',
-    createdAt: new Date().toISOString(),
-    responses: []
-  };
-
-  if (users.length >= MAX_STORAGE_SIZE) {
-    users = users.slice(-MAX_STORAGE_SIZE + 1);
-  }
-
-  users.push(ticket);
-
-  await sendSupportNotification(ticket);
+app.post('/api/trains/sync', async (req, res) => {
+  const { userId, stationId, trainId } = req.body;
 
   res.json({
     success: true,
-    ticket: {
-      id: ticket.id,
-      status: ticket.status,
-      createdAt: ticket.createdAt
-    }
+    syncId: `SYNC_${Date.now()}`,
+    message: '電車遅延時に自動でタクシーを配車します',
+    monitoring: true,
+    station: stationId,
+    train: trainId,
+    userId: userId
   });
-}));
+});
 
-// User management
-app.post('/api/users', asyncHandler(async (req, res) => {
-  const { name, phone, role, location } = req.body;
+// ========================================
+// BOOKING ENDPOINTS
+// ========================================
+// Serve admin panel
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, './admin.html'));
+});
 
-  if (!name || !phone || !role) {
-    return res.status(400).json({ error: 'Name, phone, and role are required' });
+// Admin stats endpoint
+app.get('/api/admin/stats', (req, res) => {
+  // Read bookings from file or database
+  const fs = require('fs');
+  let bookingCount = 0;
+  let revenue = 0;
+
+  try {
+    if (fs.existsSync('./routes/bookings.json')) {
+      const bookings = fs.readFileSync('./routes/bookings.json', 'utf8')
+        .split('\n')
+        .filter(line => line)
+        .map(line => JSON.parse(line));
+
+      bookingCount = bookings.length;
+      revenue = bookings.reduce((sum, b) => sum + (b.estimatedFare || 0), 0);
+    }
+  } catch (error) {
+    console.error('Error reading bookings:', error);
   }
 
+  res.json({
+    bookingCount,
+    driverCount: 3, // Mock for now
+    revenue,
+    timestamp: new Date()
+  });
+});
+
+app.post('/api/bookings/create', async (req, res) => {
+  const booking = {
+    id: 'BK' + Date.now(),
+    ...req.body,
+    createdAt: new Date(),
+    status: 'pending'
+  };
+
+  // Save to a simple JSON file for now
+  const fs = require('fs');
+  fs.appendFileSync('./routes/bookings.json', JSON.stringify(booking) + '\n');
+
+  res.json({ success: true, booking });
+});
+
+app.get('/api/bookings/:id', (req, res) => {
+  const booking = bookings.find(b => b.id === req.params.id);
+
+  if (!booking) {
+    return res.status(404).json({ error: '予約が見つかりません' });
+  }
+
+  res.json(booking);
+});
+
+app.get('/api/bookings', (req, res) => {
+  const { userId, status } = req.query;
+
+  let filteredBookings = bookings;
+
+  if (userId) {
+    filteredBookings = filteredBookings.filter(b => b.userId === userId);
+  }
+
+  if (status) {
+    filteredBookings = filteredBookings.filter(b => b.status === status);
+  }
+
+  res.json({
+    bookings: filteredBookings,
+    total: filteredBookings.length
+  });
+});
+
+app.put('/api/bookings/:id/status', (req, res) => {
+  const { status } = req.body;
+  const booking = bookings.find(b => b.id === req.params.id);
+
+  if (!booking) {
+    return res.status(404).json({ error: '予約が見つかりません' });
+  }
+
+  booking.status = status;
+  booking.updatedAt = new Date().toISOString();
+
+  // Emit status change
+  io.emit('booking_status_changed', booking);
+
+  res.json({
+    success: true,
+    booking
+  });
+});
+
+// ========================================
+// DRIVER ENDPOINTS
+// ========================================
+
+app.get('/api/drivers/nearby', (req, res) => {
+  const { lat, lng, radius } = req.query;
+
+  const userLat = parseFloat(lat) || 35.6812;
+  const userLng = parseFloat(lng) || 139.7671;
+
+  // Calculate distance and ETA for each driver
+  const nearbyDrivers = drivers
+    .filter(d => d.isOnline)
+    .map(driver => {
+      // Simple distance calculation (in reality, use Haversine formula)
+      const distance = Math.sqrt(
+        Math.pow(driver.location.latitude - userLat, 2) +
+        Math.pow(driver.location.longitude - userLng, 2)
+      ) * 111000; // Convert to meters (rough approximation)
+
+      return {
+        ...driver,
+        distance: Math.round(distance),
+        eta: Math.ceil(distance / 500) + 2, // Rough ETA in minutes
+        fare_estimate: Math.round(1000 + distance * 2.5) // Base fare + distance
+      };
+    })
+    .filter(d => d.distance <= (parseInt(radius) || 2000))
+    .sort((a, b) => a.distance - b.distance);
+
+  res.json({
+    drivers: nearbyDrivers,
+    total: nearbyDrivers.length,
+    searchRadius: radius || 2000,
+    userLocation: { lat: userLat, lng: userLng }
+  });
+});
+
+app.get('/api/drivers/online', (req, res) => {
+  const onlineDrivers = drivers.filter(d => d.isOnline);
+
+  res.json({
+    drivers: onlineDrivers,
+    total: onlineDrivers.length,
+    regions: {
+      tokyo: onlineDrivers.filter(d => d.location.latitude > 35.5 && d.location.latitude < 35.8).length,
+      osaka: onlineDrivers.filter(d => d.location.latitude > 34.5 && d.location.latitude < 34.8).length,
+      other: onlineDrivers.filter(d => !(d.location.latitude > 35.5 && d.location.latitude < 35.8) && !(d.location.latitude > 34.5 && d.location.latitude < 34.8)).length
+    }
+  });
+});
+
+app.post('/api/drivers/:id/location', (req, res) => {
+  const { latitude, longitude } = req.body;
+  const driver = drivers.find(d => d.id === req.params.id);
+
+  if (!driver) {
+    return res.status(404).json({ error: 'ドライバーが見つかりません' });
+  }
+
+  driver.location = { latitude, longitude };
+  driver.lastUpdated = new Date().toISOString();
+
+  // Emit location update
+  io.emit('driver_location_updated', {
+    driverId: driver.id,
+    location: driver.location
+  });
+
+  res.json({
+    success: true,
+    driver
+  });
+});
+
+app.put('/api/drivers/:id/status', (req, res) => {
+  const { isOnline } = req.body;
+  const driver = drivers.find(d => d.id === req.params.id);
+
+  if (!driver) {
+    return res.status(404).json({ error: 'ドライバーが見つかりません' });
+  }
+
+  driver.isOnline = isOnline;
+  driver.statusUpdatedAt = new Date().toISOString();
+
+  // Emit status change
+  io.emit('driver_status_changed', {
+    driverId: driver.id,
+    isOnline: driver.isOnline
+  });
+
+  res.json({
+    success: true,
+    driver
+  });
+});
+
+// ========================================
+// WEATHER ENDPOINT
+// ========================================
+
+app.get('/api/weather', (req, res) => {
+  const { lat, lng } = req.query;
+
+  const weatherConditions = ['clear', 'cloudy', 'rainy', 'heavy_rain'];
+  const currentWeather = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
+
+  const surgeMultiplier = {
+    clear: 1.0,
+    cloudy: 1.0,
+    rainy: 1.15,
+    heavy_rain: 1.30
+  };
+
+  res.json({
+    location: { lat: parseFloat(lat) || 35.6812, lng: parseFloat(lng) || 139.7671 },
+    condition: currentWeather,
+    temperature: 18 + Math.floor(Math.random() * 15),
+    humidity: 40 + Math.floor(Math.random() * 40),
+    surgeMultiplier: surgeMultiplier[currentWeather],
+    surgeReason: currentWeather === 'rainy' ? '雨天のため' : currentWeather === 'heavy_rain' ? '豪雨のため' : null,
+    forecast: '今日は雨の可能性があります',
+    hourlyForecast: [
+      { hour: new Date().getHours(), condition: currentWeather, temp: 20 },
+      { hour: (new Date().getHours() + 1) % 24, condition: 'cloudy', temp: 19 },
+      { hour: (new Date().getHours() + 2) % 24, condition: 'rainy', temp: 18 }
+    ]
+  });
+});
+
+// ========================================
+// PAYMENT ENDPOINTS (Mock/Safe Mode)
+// ========================================
+
+app.get('/api/payment/test', (req, res) => {
+  res.json({
+    status: 'Payment system ready',
+    mode: 'mock',
+    environment: 'sandbox',
+    acceptedMethods: ['cash', 'credit_card', 'ic_card', 'paypay', 'line_pay'],
+    message: 'テスト環境で動作中（実際の課金なし）'
+  });
+});
+
+app.post('/api/payment/credit-card', async (req, res) => {
+  const { amount, customerId, bookingId } = req.body;
+
+  // Mock payment processing
+  const payment = {
+    success: true,
+    paymentId: `PAY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    method: 'credit_card',
+    status: 'COMPLETED',
+    amount: amount,
+    currency: 'JPY',
+    customerId: customerId,
+    bookingId: bookingId,
+    processedAt: new Date().toISOString(),
+    receipt: `https://receipt.zenkoku-ai-taxi.jp/mock/${Date.now()}`,
+    message: '支払いが完了しました（テストモード）'
+  };
+
+  res.json(payment);
+});
+
+app.post('/api/payment/ic-card', async (req, res) => {
+  const { amount, customerId, cardType, bookingId } = req.body;
+
+  const payment = {
+    success: true,
+    paymentId: `IC_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    method: 'ic_card',
+    cardType: cardType || 'Suica',
+    status: 'COMPLETED',
+    amount: amount,
+    currency: 'JPY',
+    customerId: customerId,
+    bookingId: bookingId,
+    processedAt: new Date().toISOString(),
+    balance: Math.floor(Math.random() * 10000) + 1000, // Mock remaining balance
+    message: `${cardType || 'ICカード'}での支払いが完了しました（テストモード）`
+  };
+
+  res.json(payment);
+});
+
+app.post('/api/payment/calculate-fare', (req, res) => {
+  const { distance, duration, surgeMultiplier } = req.body;
+
+  const baseFare = 730; // Initial fare
+  const distanceFare = Math.ceil(distance / 237) * 90; // ¥90 per 237m
+  const timeFare = Math.ceil(duration / 85) * 40; // ¥40 per 85 seconds
+  const subtotal = baseFare + distanceFare + timeFare;
+  const surgeFare = Math.round(subtotal * (surgeMultiplier || 1));
+  const tax = Math.round(surgeFare * 0.1);
+  const total = surgeFare + tax;
+
+  res.json({
+    breakdown: {
+      baseFare,
+      distanceFare,
+      timeFare,
+      surgeMultiplier: surgeMultiplier || 1,
+      subtotal,
+      surgeFare,
+      tax,
+      total
+    },
+    estimatedFare: total,
+    currency: 'JPY',
+    calculation: '初乗り + 距離料金 + 時間料金 + 需要料金'
+  });
+});
+
+// ========================================
+// STATION ENDPOINTS
+// ========================================
+
+app.get('/api/stations', (req, res) => {
+  const { region, limit } = req.query;
+
+  let filteredStations = stations;
+
+  if (region) {
+    filteredStations = filteredStations.filter(s => s.region === region);
+  }
+
+  if (limit) {
+    filteredStations = filteredStations.slice(0, parseInt(limit));
+  }
+
+  res.json({
+    stations: filteredStations,
+    total: filteredStations.length,
+    regions: [...new Set(stations.map(s => s.region))]
+  });
+});
+
+app.get('/api/stations/search', (req, res) => {
+  const { q } = req.query;
+
+  if (!q) {
+    return res.status(400).json({ error: '検索キーワードが必要です' });
+  }
+
+  const results = stations.filter(s =>
+    s.name.includes(q) || s.id.includes(q.toLowerCase())
+  );
+
+  res.json({
+    query: q,
+    results,
+    total: results.length
+  });
+});
+
+app.get('/api/stations/nearby', (req, res) => {
+  const { lat, lng, limit } = req.query;
+  const userLat = parseFloat(lat) || 35.6812;
+  const userLng = parseFloat(lng) || 139.7671;
+  const maxResults = parseInt(limit) || 5;
+
+  const nearbyStations = stations
+    .map(station => {
+      const distance = Math.sqrt(
+        Math.pow(station.lat - userLat, 2) +
+        Math.pow(station.lng - userLng, 2)
+      ) * 111000; // Convert to meters
+
+      return { ...station, distance: Math.round(distance) };
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, maxResults);
+
+  res.json({
+    stations: nearbyStations,
+    total: nearbyStations.length,
+    userLocation: { lat: userLat, lng: userLng }
+  });
+});
+
+// ========================================
+// AI RECOMMENDATIONS ENDPOINT
+// ========================================
+
+app.get('/api/ai/hotspots', (req, res) => {
+  const { driverId, lat, lng } = req.query;
+  const now = new Date();
+  const hour = now.getHours();
+
+  // Time-based hotspot recommendations
+  let hotspots = [];
+
+  if (hour >= 7 && hour <= 9) {
+    // Morning rush hour
+    hotspots = [
+      { name: '東京駅', lat: 35.6812, lng: 139.7671, demand: 'very_high', reason: '通勤ラッシュ' },
+      { name: '新宿駅', lat: 35.6896, lng: 139.6995, demand: 'very_high', reason: '通勤ラッシュ' },
+      { name: '渋谷駅', lat: 35.6580, lng: 139.7016, demand: 'high', reason: 'ビジネス街' }
+    ];
+  } else if (hour >= 17 && hour <= 20) {
+    // Evening rush hour
+    hotspots = [
+      { name: '六本木', lat: 35.6641, lng: 139.7293, demand: 'very_high', reason: '飲み会需要' },
+      { name: '銀座', lat: 35.6717, lng: 139.7640, demand: 'high', reason: 'ショッピング' },
+      { name: '品川駅', lat: 35.6284, lng: 139.7387, demand: 'high', reason: '新幹線利用客' }
+    ];
+  } else if (hour >= 22 || hour <= 2) {
+    // Late night
+    hotspots = [
+      { name: '歌舞伎町', lat: 35.6938, lng: 139.7036, demand: 'very_high', reason: '繁華街' },
+      { name: '渋谷センター街', lat: 35.6590, lng: 139.6982, demand: 'high', reason: '若者の街' },
+      { name: '六本木', lat: 35.6641, lng: 139.7293, demand: 'high', reason: 'ナイトライフ' }
+    ];
+  } else {
+    // Regular hours
+    hotspots = [
+      { name: '羽田空港', lat: 35.5494, lng: 139.7798, demand: 'medium', reason: '空港利用客' },
+      { name: '東京スカイツリー', lat: 35.7101, lng: 139.8107, demand: 'medium', reason: '観光地' },
+      { name: 'お台場', lat: 35.6251, lng: 139.7756, demand: 'low', reason: 'レジャー施設' }
+    ];
+  }
+
+  res.json({
+    driverId,
+    currentLocation: { lat: parseFloat(lat) || 35.6812, lng: parseFloat(lng) || 139.7671 },
+    recommendations: hotspots,
+    timestamp: now.toISOString(),
+    nextUpdate: new Date(now.getTime() + 30 * 60000).toISOString() // 30 minutes
+  });
+});
+
+app.get('/api/ai/demand-forecast', (req, res) => {
+  const { region, date } = req.query;
+  const targetDate = date ? new Date(date) : new Date();
+
+  // Generate forecast for next 24 hours
+  const forecast = [];
+  for (let i = 0; i < 24; i++) {
+    const hour = (targetDate.getHours() + i) % 24;
+    let demandLevel = 'low';
+
+    if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 20)) {
+      demandLevel = 'very_high';
+    } else if ((hour >= 12 && hour <= 13) || (hour >= 22 && hour <= 23)) {
+      demandLevel = 'high';
+    } else if (hour >= 10 && hour <= 16) {
+      demandLevel = 'medium';
+    }
+
+    forecast.push({
+      hour,
+      demandLevel,
+      estimatedRides: Math.floor(Math.random() * 50) + (demandLevel === 'very_high' ? 100 : demandLevel === 'high' ? 50 : demandLevel === 'medium' ? 20 : 5),
+      surgeMultiplier: demandLevel === 'very_high' ? 1.5 : demandLevel === 'high' ? 1.2 : 1.0
+    });
+  }
+
+  res.json({
+    region: region || 'tokyo',
+    date: targetDate.toISOString(),
+    forecast,
+    summary: {
+      peakHours: [7, 8, 9, 17, 18, 19, 20],
+      totalEstimatedRides: forecast.reduce((sum, f) => sum + f.estimatedRides, 0),
+      averageSurge: (forecast.reduce((sum, f) => sum + f.surgeMultiplier, 0) / forecast.length).toFixed(2)
+    }
+  });
+});
+
+// ========================================
+// USER MANAGEMENT
+// ========================================
+
+const users = [];
+
+app.post('/api/users/register', (req, res) => {
+  const { name, email, phone, role } = req.body;
+
   const user = {
-    id: Date.now().toString(),
+    id: `USER_${Date.now()}`,
     name,
+    email,
     phone,
-    role,
-    location: location || null,
+    role: role || 'customer',
     createdAt: new Date().toISOString(),
     isActive: true
   };
 
   users.push(user);
 
-  if (firestore) {
-    try {
-      await firestore.collection('users').doc(user.id).set(user);
-      console.log('✅ User saved to Firestore');
-    } catch (firestoreError) {
-      console.error('❌ Firestore save error:', firestoreError);
-    }
-  }
-
-  console.log(`👤 New ${role} registered: ${name}`);
-  res.json({ success: true, user });
-}));
-
-// Get online drivers
-app.get('/api/drivers/online', asyncHandler(async (req, res) => {
-  const { region } = req.query;
-  let onlineDrivers = drivers.filter(d => d.isOnline);
-
-  if (region) {
-    onlineDrivers = onlineDrivers.filter(d => {
-      if (!d.location) return false;
-      const driverRegion = getRegionByCoordinates(d.location.latitude, d.location.longitude);
-      return driverRegion === region;
-    });
-  }
-
-  const driversData = onlineDrivers.map(d => ({
-    id: d.id,
-    name: d.name,
-    location: d.location,
-    isOnline: d.isOnline
-  }));
-
   res.json({
-    drivers: driversData,
-    total: driversData.length,
-    region: region || 'all'
+    success: true,
+    user,
+    message: '登録が完了しました'
   });
-}));
+});
+
+app.get('/api/users/:id', (req, res) => {
+  const user = users.find(u => u.id === req.params.id);
+
+  if (!user) {
+    return res.status(404).json({ error: 'ユーザーが見つかりません' });
+  }
+
+  res.json(user);
+});
 
 // ========================================
-// ERROR HANDLING MIDDLEWARE
+// WebSocket CONNECTION HANDLING
+// ========================================
+
+const activeConnections = new Map();
+
+io.on('connection', (socket) => {
+  console.log('👤 Client connected:', socket.id);
+  activeConnections.set(socket.id, { connectedAt: new Date(), type: 'unknown' });
+
+  // Join room based on user type
+  socket.on('join', (data) => {
+    const { userId, userType } = data;
+    socket.join(userType); // 'customer' or 'driver'
+    activeConnections.set(socket.id, { ...activeConnections.get(socket.id), userId, userType });
+    console.log(`User ${userId} joined as ${userType}`);
+  });
+
+  // Handle driver location updates
+  socket.on('driver_location_update', (data) => {
+    const driver = drivers.find(d => d.id === data.driverId);
+    if (driver) {
+      driver.location = data.location;
+      driver.lastUpdated = new Date().toISOString();
+
+      // Broadcast to all customers
+      socket.broadcast.to('customer').emit('driver_moved', {
+        driverId: data.driverId,
+        location: data.location
+      });
+    }
+  });
+
+  // Handle booking acceptance
+  socket.on('accept_booking', (data) => {
+    const booking = bookings.find(b => b.id === data.bookingId);
+    if (booking) {
+      booking.status = 'accepted';
+      booking.acceptedAt = new Date().toISOString();
+      booking.driverId = data.driverId;
+
+      // Notify customer
+      io.emit('booking_accepted', booking);
+    }
+  });
+
+  // Handle ride start
+  socket.on('start_ride', (data) => {
+    const booking = bookings.find(b => b.id === data.bookingId);
+    if (booking) {
+      booking.status = 'in_progress';
+      booking.startedAt = new Date().toISOString();
+
+      io.emit('ride_started', booking);
+    }
+  });
+
+  // Handle ride completion
+  socket.on('complete_ride', (data) => {
+    const booking = bookings.find(b => b.id === data.bookingId);
+    if (booking) {
+      booking.status = 'completed';
+      booking.completedAt = new Date().toISOString();
+      booking.actualFare = data.fare;
+
+      io.emit('ride_completed', booking);
+    }
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    const connection = activeConnections.get(socket.id);
+    console.log('👤 Client disconnected:', socket.id, connection?.userType);
+    activeConnections.delete(socket.id);
+  });
+});
+
+// ========================================
+// ERROR HANDLING
 // ========================================
 
 app.use((error, req, res, next) => {
-  console.error('🚨 EXPRESS ERROR:', error);
-
-  logToExternalService('express_error', error);
-
-  const isDevelopment = process.env.NODE_ENV === 'development';
-
+  console.error('🚨 ERROR:', error);
   res.status(error.status || 500).json({
-    error: isDevelopment ? error.message : 'Internal server error',
-    ...(isDevelopment && { stack: error.stack }),
+    error: error.message || 'Internal server error',
     timestamp: new Date().toISOString(),
-    requestId: req.headers['x-request-id'] || 'unknown'
+    path: req.path
   });
 });
 
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
-    error: 'Route not found',
+    error: 'エンドポイントが見つかりません',
     path: req.path,
     method: req.method,
     timestamp: new Date().toISOString()
@@ -967,32 +825,48 @@ app.use((req, res) => {
 });
 
 // ========================================
-// SERVER INITIALIZATION
+// SERVER START
 // ========================================
 
-async function initializeServer() {
-  try {
-    await initializeFirebase();
+const PORT = process.env.PORT || 8080;
 
-    const PORT = process.env.PORT || 8080;
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚕 全国AIタクシー Backend running on port ${PORT}`);
-      console.log('📡 WebSocket ready for connections');
-      console.log('🔥 Firebase:', firestore ? 'connected' : 'disconnected');
-      console.log('🌦️ Weather API: Configured');
-      console.log(`🗾 Coverage: Nationwide Japan (${Object.keys(REGIONS).length} regions)`);
-      console.log(`🚇 Total Stations: ${ALL_JAPAN_STATIONS.length}`);
-      console.log('💬 LINE integration: Ready');
-      console.log('🛡️ Crash prevention: Active');
-      console.log('🎯 Ready for production!');
-    });
-  } catch (error) {
-    console.error('❌ Failed to initialize server:', error);
-    logToExternalService('server_init_error', error);
-    process.exit(1);
-  }
-}
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('========================================');
+  console.log(`🚕 全国AIタクシー Backend v3.0.1`);
+  console.log(`📡 Server running on port ${PORT}`);
+  console.log(`🌐 WebSocket ready for connections`);
+  console.log(`💳 Payment: Mock mode (safe for testing)`);
+  console.log(`🗾 Coverage: Nationwide Japan`);
+  console.log(`🚇 Stations: ${stations.length}`);
+  console.log(`👥 Online Drivers: ${drivers.filter(d => d.isOnline).length}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🎯 Status: Ready for production!`);
+  console.log(`🔗 Health: http://localhost:${PORT}/health`);
+  console.log('========================================');
+});
 
-initializeServer();
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('📴 SIGTERM received, shutting down gracefully...');
+  io.close(() => {
+    console.log('🔴 WebSocket server closed');
+  });
+  server.close(() => {
+    console.log('🔴 HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('\n📴 SIGINT received, shutting down gracefully...');
+  io.close(() => {
+    console.log('🔴 WebSocket server closed');
+  });
+  server.close(() => {
+    console.log('🔴 HTTP server closed');
+    process.exit(0);
+  });
+});
 
 module.exports = app;
+// Deploy trigger: Fri Sep  5 09:50:40 JST 2025

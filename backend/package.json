@@ -1,5 +1,6 @@
 {
   "name": "zenkoku-ai-taxi-backend",
+<<<<<<< HEAD
   "version": "3.0.0",
   "description": "全国AIタクシー Backend Server",
   "main": "server-simplified.js",
@@ -13,6 +14,29 @@
     "cors": "^2.8.5",
     "socket.io": "^4.6.1",
     "dotenv": "^16.3.1"
+=======
+  "version": "3.0.1",
+  "description": "全国AIタクシー Backend Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "echo 'No build required'",
+    "test": "echo \"Test mode\" && exit 0",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
+  },
+  "dependencies": {
+    "@stripe/stripe-react-native": "^0.51.0",
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "pnpm": "^10.15.1",
+    "react-native-square-in-app-payments": "^1.7.6",
+    "socket.io": "^4.6.1",
+    "square": "^43.0.2",
+    "stripe": "^18.5.0"
+>>>>>>> 547eda78544a013d049879e56f29413b70a441e5
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
@@ -24,8 +48,20 @@
     "taxi",
     "japan",
     "transportation",
+<<<<<<< HEAD
     "api"
   ],
   "author": "Tatsuru Kikuchi",
   "license": "MIT"
+=======
+    "api",
+    "realtime"
+  ],
+  "author": "Tatsuru Kikuchi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tatsuru-kikuchi/tokyo-taxi-ai"
+  }
+>>>>>>> 547eda78544a013d049879e56f29413b70a441e5
 }

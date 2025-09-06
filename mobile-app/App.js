@@ -7,23 +7,31 @@ import {
   SafeAreaView,
   Alert,
   Dimensions,
-  Platform
+  Platform,
+  ActivityIndicator
 } from 'react-native';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import CustomerScreen from './screens/CustomerScreen';
 import DriverScreen from './screens/DriverScreen';
 
-// Get screen dimensions for responsive design
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
 
 export default function App() {
   const [mode, setMode] = useState(null);
   const [locationPermission, setLocationPermission] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    requestLocationPermission();
+    initializeApp();
   }, []);
+
+  const initializeApp = async () => {
+    await requestLocationPermission();
+    setIsLoading(false);
+  };
 
   const requestLocationPermission = async () => {
     try {
@@ -45,9 +53,9 @@ export default function App() {
     setMode(selectedMode);
   };
 
-  const handleSwitchMode = () => {
-    console.log('Switching mode from', mode, 'to', mode === 'customer' ? 'driver' : 'customer');
-    setMode(mode === 'customer' ? 'driver' : 'customer');
+  const handleModeChange = (newMode) => {
+    console.log('Changing mode to:', newMode);
+    setMode(newMode);
   };
 
   const handleBackToSelection = () => {
@@ -55,47 +63,59 @@ export default function App() {
     setMode(null);
   };
 
+  if (isLoading) {
+    return (
+      <SafeAreaView style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#FFD700" />
+        <Text style={styles.loadingText}>準備中...</Text>
+      </SafeAreaView>
+    );
+  }
+
   if (mode === 'customer') {
     return (
-      <CustomerScreen 
-        onSwitchMode={handleSwitchMode}
-        onBackToSelection={handleBackToSelection}
+      <CustomerScreen
+        onModeChange={handleModeChange}
+        onBack={handleBackToSelection}
       />
     );
   }
 
   if (mode === 'driver') {
     return (
-      <DriverScreen 
-        onSwitchMode={handleSwitchMode}
-        onBackToSelection={handleBackToSelection}
+      <DriverScreen
+        onModeChange={handleModeChange}
+        onBack={handleBackToSelection}
       />
     );
   }
 
+  // Main selection screen
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.mainContainer, isTablet && styles.mainContainerTablet]}>
         <View style={styles.header}>
           <Text style={[styles.logo, isTablet && styles.logoTablet]}>🚕</Text>
           <Text style={[styles.title, isTablet && styles.titleTablet]}>全国AIタクシー</Text>
-          <Text style={[styles.subtitle, isTablet && styles.subtitleTablet]}>AI技術で革新する配車サービス</Text>
+          <Text style={[styles.subtitle, isTablet && styles.subtitleTablet]}>
+            全国8,600駅対応・天気予報連動配車
+          </Text>
         </View>
 
         <View style={[styles.featuresContainer, isTablet && styles.featuresContainerTablet]}>
           <Text style={[styles.featuresTitle, isTablet && styles.featuresTitleTablet]}>🆕 新機能</Text>
           <View style={styles.featureGrid}>
             <View style={styles.featureItem}>
-              <Text style={styles.featureEmoji}>🗺️</Text>
-              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>AI配車最適化</Text>
+              <Text style={styles.featureEmoji}>🌧️</Text>
+              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>雨予報で自動配車</Text>
             </View>
             <View style={styles.featureItem}>
               <Text style={styles.featureEmoji}>💰</Text>
               <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>GOより¥1,380お得</Text>
             </View>
             <View style={styles.featureItem}>
-              <Text style={styles.featureEmoji}>🚆</Text>
-              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>電車連携機能</Text>
+              <Text style={styles.featureEmoji}>🚉</Text>
+              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>全国8,600駅対応</Text>
             </View>
             <View style={styles.featureItem}>
               <Text style={styles.featureEmoji}>📈</Text>
@@ -105,7 +125,7 @@ export default function App() {
         </View>
 
         <View style={[styles.buttonContainer, isTablet && styles.buttonContainerTablet]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.modeButton, styles.customerButton, isTablet && styles.modeButtonTablet]}
             onPress={() => handleModeSelect('customer')}
           >
@@ -114,7 +134,7 @@ export default function App() {
             <Text style={[styles.buttonSubtitle, isTablet && styles.buttonSubtitleTablet]}>配車をリクエスト</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.modeButton, styles.driverButton, isTablet && styles.modeButtonTablet]}
             onPress={() => handleModeSelect('driver')}
           >
@@ -129,7 +149,7 @@ export default function App() {
             位置情報: {locationPermission ? '✅ 許可済み' : '❌ 未許可'}
           </Text>
           <Text style={[styles.versionText, isTablet && styles.versionTextTablet]}>
-            Version 3.0.1 (Build 108)
+            Version 3.1.0 (Build 120)
           </Text>
         </View>
       </View>
@@ -142,16 +162,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 20,
+    fontSize: 16,
+    color: '#666',
+  },
   mainContainer: {
     flex: 1,
-    padding: 20,
     justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   mainContainerTablet: {
-    paddingHorizontal: 60,
-    maxWidth: 768,
-    alignSelf: 'center',
-    width: '100%',
+    padding: 40,
   },
   header: {
     alignItems: 'center',
@@ -163,21 +190,20 @@ const styles = StyleSheet.create({
   },
   logoTablet: {
     fontSize: 80,
-    marginBottom: 15,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 5,
+    marginBottom: 10,
   },
   titleTablet: {
     fontSize: 36,
-    marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
     color: '#666',
+    textAlign: 'center',
   },
   subtitleTablet: {
     fontSize: 18,
@@ -185,28 +211,28 @@ const styles = StyleSheet.create({
   featuresContainer: {
     backgroundColor: 'white',
     borderRadius: 15,
-    padding: 15,
+    padding: 20,
     marginBottom: 30,
+    width: '100%',
+    maxWidth: 400,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   featuresContainerTablet: {
-    padding: 25,
-    borderRadius: 20,
-    marginBottom: 40,
+    maxWidth: 600,
+    padding: 30,
   },
   featuresTitle: {
     fontSize: 16,
     fontWeight: 'bold',
+    marginBottom: 15,
     color: '#333',
-    marginBottom: 10,
   },
   featuresTitleTablet: {
     fontSize: 20,
-    marginBottom: 15,
   },
   featureGrid: {
     flexDirection: 'row',
@@ -214,69 +240,67 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 5,
     width: '48%',
+    alignItems: 'center',
+    marginBottom: 15,
   },
   featureEmoji: {
-    fontSize: 20,
-    marginRight: 10,
+    fontSize: 30,
+    marginBottom: 5,
   },
   featureText: {
-    fontSize: 14,
-    color: '#555',
-    flex: 1,
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
   featureTextTablet: {
-    fontSize: 16,
+    fontSize: 14,
   },
   buttonContainer: {
     width: '100%',
+    maxWidth: 400,
+    marginBottom: 30,
   },
   buttonContainerTablet: {
     maxWidth: 600,
-    alignSelf: 'center',
   },
   modeButton: {
-    padding: 25,
+    padding: 20,
     borderRadius: 15,
-    marginBottom: 20,
+    marginBottom: 15,
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 8,
+    elevation: 5,
   },
   modeButtonTablet: {
-    padding: 35,
-    borderRadius: 20,
-    marginBottom: 25,
+    padding: 30,
   },
   customerButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#FFD700',
   },
   driverButton: {
     backgroundColor: '#ff6b6b',
   },
   buttonIcon: {
-    fontSize: 40,
-    marginBottom: 10,
+    fontSize: 30,
+    marginRight: 15,
   },
   buttonIconTablet: {
-    fontSize: 50,
-    marginBottom: 15,
+    fontSize: 40,
+    marginRight: 20,
   },
   buttonTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 5,
   },
   buttonTitleTablet: {
-    fontSize: 24,
-    marginBottom: 8,
+    fontSize: 22,
   },
   buttonSubtitle: {
     fontSize: 14,
@@ -287,8 +311,7 @@ const styles = StyleSheet.create({
   },
   statusBar: {
     position: 'absolute',
-    bottom: 30,
-    alignSelf: 'center',
+    bottom: 20,
     alignItems: 'center',
   },
   statusText: {

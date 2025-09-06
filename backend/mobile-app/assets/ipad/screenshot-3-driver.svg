@@ -1,0 +1,75 @@
+<svg width="2048" height="2732" viewBox="0 0 2048 2732" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="header3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff5252;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="2048" height="2732" fill="#f5f5f5"/>
+  
+  <!-- Header -->
+  <rect width="2048" height="350" fill="url(#header3)"/>
+  <text x="1024" y="180" font-family="Hiragino Sans, Arial" font-size="100" font-weight="bold" text-anchor="middle" fill="white">🚗 ドライバーモード</text>
+  <text x="1024" y="270" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="rgba(255,255,255,0.9)">全国AIタクシー</text>
+  
+  <!-- Earnings Card -->
+  <rect x="60" y="410" width="1928" height="500" rx="40" fill="white"/>
+  <text x="1024" y="520" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="#666">本日の収益</text>
+  <text x="1024" y="680" font-family="Hiragino Sans, Arial" font-size="180" font-weight="bold" text-anchor="middle" fill="#4CAF50">¥28,500</text>
+  
+  <!-- Stats Row -->
+  <g transform="translate(512, 800)">
+    <text x="0" y="0" font-family="Hiragino Sans, Arial" font-size="80" font-weight="bold" text-anchor="middle" fill="#333">23</text>
+    <text x="0" y="60" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#999">完了</text>
+  </g>
+  <g transform="translate(1024, 800)">
+    <text x="0" y="0" font-family="Hiragino Sans, Arial" font-size="80" font-weight="bold" text-anchor="middle" fill="#333">8h</text>
+    <text x="0" y="60" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#999">稼働</text>
+  </g>
+  <g transform="translate(1536, 800)">
+    <text x="0" y="0" font-family="Hiragino Sans, Arial" font-size="80" font-weight="bold" text-anchor="middle" fill="#333">¥3,562</text>
+    <text x="0" y="60" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#999">時給</text>
+  </g>
+  
+  <!-- AI Recommendations -->
+  <rect x="60" y="1000" width="1928" height="600" rx="40" fill="white"/>
+  <text x="140" y="1100" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" fill="#333">AI推奨エリア</text>
+  
+  <rect x="140" y="1180" width="1768" height="120" fill="#fff3e0"/>
+  <text x="200" y="1260" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">六本木エリア</text>
+  <text x="1800" y="1260" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" text-anchor="end" fill="#ff6b6b">x1.3</text>
+  
+  <rect x="140" y="1320" width="1768" height="120" fill="#f3e5f5"/>
+  <text x="200" y="1400" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">羽田空港</text>
+  <text x="1800" y="1400" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" text-anchor="end" fill="#ff6b6b">x1.2</text>
+  
+  <rect x="140" y="1460" width="1768" height="120" fill="#e8f5e9"/>
+  <text x="200" y="1540" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">東京駅</text>
+  <text x="1800" y="1540" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" text-anchor="end" fill="#ff6b6b">x1.1</text>
+  
+  <!-- GO Comparison -->
+  <rect x="60" y="1680" width="1928" height="450" rx="40" fill="#fff3cd" stroke="#ffc107" stroke-width="4"/>
+  <text x="140" y="1800" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" fill="#333">🏆 GO比較</text>
+  
+  <text x="200" y="1920" font-family="Hiragino Sans, Arial" font-size="56" fill="#333">手数料率</text>
+  <text x="1800" y="1920" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" text-anchor="end" fill="#4CAF50">15% (GOは25%)</text>
+  
+  <text x="200" y="2020" font-family="Hiragino Sans, Arial" font-size="56" fill="#333">月収差額</text>
+  <text x="1800" y="2020" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" text-anchor="end" fill="#4CAF50">+¥50,000/月</text>
+  
+  <!-- Status Toggle -->
+  <rect x="60" y="2200" width="1928" height="180" rx="40" fill="white"/>
+  <text x="200" y="2320" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" fill="#333">運行状態</text>
+  <rect x="1600" y="2250" width="280" height="80" rx="40" fill="#4CAF50"/>
+  <circle cx="1820" cy="2290" r="35" fill="white"/>
+  <text x="1450" y="2320" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="end" fill="#4CAF50">オンライン</text>
+  
+  <!-- Auto Accept Toggle -->
+  <rect x="60" y="2440" width="1928" height="180" rx="40" fill="white"/>
+  <text x="200" y="2560" font-family="Hiragino Sans, Arial" font-size="64" font-weight="bold" fill="#333">自動受諾</text>
+  <rect x="1600" y="2490" width="280" height="80" rx="40" fill="#2196F3"/>
+  <circle cx="1820" cy="2530" r="35" fill="white"/>
+  <text x="1450" y="2560" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="end" fill="#2196F3">AI最適配車 ON</text>
+</svg>

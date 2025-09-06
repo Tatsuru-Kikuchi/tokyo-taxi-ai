@@ -1,0 +1,151 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
+import { CONFIG } from './config';
+import CustomerScreenEnhanced from './screens/CustomerScreenEnhanced2';  // ファイル名を修正
+import DriverScreenEnhanced from './screens/DriverScreenEnhanced';
+
+const BACKEND_URL = CONFIG.BACKEND_URL;
+
+export default function App() {
+  const [mode, setMode] = useState(null);
+  const [locationPermission, setLocationPermission] = useState(false);
+
+  useEffect(() => {
+    requestLocationPermission();
+  }, []);
+
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      setLocationPermission(status === 'granted');
+    } catch (error) {
+      console.log('Location permission error:', error);
+    }
+  };
+
+  const handleModeSelect = (selectedMode) => {
+    setMode(selectedMode);
+  };
+
+  const handleBack = () => {
+    setMode(null);
+  };
+
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.container}>
+        {!mode ? (
+          <View style={styles.mainContainer}>
+            <Text style={styles.title}>🚕 全国AIタクシー</Text>
+            <Text style={styles.subtitle}>AI技術で革新する配車サービス</Text>
+
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={[styles.modeButton, styles.customerButton]}
+                onPress={() => handleModeSelect('customer')}
+              >
+                <Text style={styles.buttonIcon}>👤</Text>
+                <Text style={styles.buttonText}>お客様</Text>
+                <Text style={styles.buttonDescription}>配車を依頼する</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modeButton, styles.driverButton]}
+                onPress={() => handleModeSelect('driver')}
+              >
+                <Text style={styles.buttonIcon}>🚗</Text>
+                <Text style={styles.buttonText}>ドライバー</Text>
+                <Text style={styles.buttonDescription}>運転業務を開始</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.infoContainer}>
+              <Text style={styles.infoText}>
+                {locationPermission ? '✅ 位置情報: 許可済み' : '⚠️ 位置情報: 未許可'}
+              </Text>
+              <Text style={styles.versionText}>Version {CONFIG.VERSION}</Text>
+            </View>
+          </View>
+        ) : mode === 'customer' ? (
+          <CustomerScreenEnhanced onBack={handleBack} />
+        ) : (
+          <DriverScreenEnhanced onBack={handleBack} />
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  mainContainer: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: '#333',
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: 40,
+  },
+  buttonContainer: {
+    gap: 20,
+  },
+  modeButton: {
+    padding: 25,
+    borderRadius: 15,
+    alignItems: 'center',
+    marginBottom: 20,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  customerButton: {
+    backgroundColor: '#667eea',
+  },
+  driverButton: {
+    backgroundColor: '#764ba2',
+  },
+  buttonIcon: {
+    fontSize: 40,
+    marginBottom: 10,
+  },
+  buttonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 5,
+  },
+  buttonDescription: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  infoContainer: {
+    marginTop: 40,
+    alignItems: 'center',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 10,
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#999',
+  },
+});
