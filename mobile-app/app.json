@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "112",
+      "buildNumber": "129",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
@@ -61,7 +61,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "配車サービスの品質向上のため、位置情報を使用します。"
         }
-      ]
+      ],
+      "expo-maps"
     ],
     "extra": {
       "backendUrl": "https://tokyo-taxi-ai-backend-production.up.railway.app",
