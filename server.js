@@ -46,7 +46,7 @@ try {
     { id: 9, name: '横浜駅', lat: 35.4657, lng: 139.6222, prefecture: '神奈川県', lines: ['JR'] },
     { id: 10, name: '名古屋駅', lat: 35.1709, lng: 136.8815, prefecture: '愛知県', lines: ['JR'] }
   ];
-}
+};
 
 // ========================================
 // DATABASE CONNECTION
