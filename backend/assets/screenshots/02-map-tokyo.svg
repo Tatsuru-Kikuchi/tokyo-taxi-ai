@@ -1,0 +1,78 @@
+<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone Frame -->
+  <rect width="375" height="812" rx="40" ry="40" fill="#000"/>
+  <rect x="15" y="15" width="345" height="782" rx="35" ry="35" fill="#f0f0f0"/>
+  
+  <!-- Status Bar -->
+  <rect x="15" y="15" width="345" height="44" fill="#000"/>
+  <text x="30" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">9:41</text>
+  <text x="320" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">100%</text>
+  
+  <!-- Header Bar -->
+  <rect x="15" y="59" width="345" height="60" fill="#667eea"/>
+  <text x="187.5" y="95" font-family="system-ui" font-size="18" font-weight="bold" text-anchor="middle" fill="white">📍 東京都 - 山手線エリア</text>
+  
+  <!-- Map Area -->
+  <rect x="30" y="139" width="315" height="400" rx="15" ry="15" fill="#e8f4f8"/>
+  
+  <!-- Map Grid Lines -->
+  <line x1="30" y1="200" x2="345" y2="200" stroke="#ddd" stroke-width="1"/>
+  <line x1="30" y1="300" x2="345" y2="300" stroke="#ddd" stroke-width="1"/>
+  <line x1="30" y1="400" x2="345" y2="400" stroke="#ddd" stroke-width="1"/>
+  <line x1="100" y1="139" x2="100" y2="539" stroke="#ddd" stroke-width="1"/>
+  <line x1="200" y1="139" x2="200" y2="539" stroke="#ddd" stroke-width="1"/>
+  <line x1="300" y1="139" x2="300" y2="539" stroke="#ddd" stroke-width="1"/>
+  
+  <!-- Major Tokyo Station Pins -->
+  <circle cx="120" cy="180" r="12" fill="#ff6b6b"/>
+  <text x="120" y="185" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="120" y="200" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">渋谷駅</text>
+  
+  <circle cx="220" cy="220" r="12" fill="#ff6b6b"/>
+  <text x="220" y="225" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="220" y="240" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">新宿駅</text>
+  
+  <circle cx="280" cy="300" r="12" fill="#ff6b6b"/>
+  <text x="280" y="305" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="280" y="320" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">東京駅</text>
+  
+  <circle cx="150" cy="350" r="12" fill="#ff6b6b"/>
+  <text x="150" y="355" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="150" y="370" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">池袋駅</text>
+  
+  <circle cx="200" cy="380" r="12" fill="#ffa726"/>
+  <text x="200" y="385" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="200" y="400" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">品川駅</text>
+  
+  <circle cx="100" cy="320" r="12" fill="#4CAF50"/>
+  <text x="100" y="325" font-family="system-ui" font-size="8" font-weight="bold" text-anchor="middle" fill="white">駅</text>
+  <text x="100" y="340" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">原宿駅</text>
+  
+  <!-- High Demand Area -->
+  <circle cx="170" cy="250" r="30" fill="rgba(255, 107, 107, 0.3)" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="170" y="255" font-family="system-ui" font-size="10" font-weight="bold" text-anchor="middle" fill="#ff6b6b">高需要</text>
+  
+  <!-- Current Location -->
+  <circle cx="187.5" cy="300" r="8" fill="#4CAF50"/>
+  <circle cx="187.5" cy="300" r="4" fill="white"/>
+  <text x="187.5" y="325" font-family="system-ui" font-size="10" text-anchor="middle" fill="#333">現在地</text>
+  
+  <!-- AI Recommendation Card -->
+  <rect x="30" y="559" width="315" height="80" rx="15" ry="15" fill="white" stroke="#ddd" stroke-width="1"/>
+  <text x="50" y="580" font-family="system-ui" font-size="14" font-weight="bold" fill="#333">🤖 AI推奨エリア</text>
+  <text x="50" y="600" font-family="system-ui" font-size="12" fill="#666">渋谷・新宿周辺で需要急増中</text>
+  <text x="50" y="620" font-family="system-ui" font-size="12" fill="#666">🌧️ 雨予報のため山手線沿いが最適</text>
+  
+  <!-- Bottom Navigation -->
+  <rect x="15" y="659" width="345" height="80" fill="white"/>
+  <line x1="15" y1="659" x2="360" y2="659" stroke="#eee" stroke-width="1"/>
+  
+  <rect x="50" y="679" width="80" height="40" rx="8" ry="8" fill="#667eea"/>
+  <text x="90" y="705" font-family="system-ui" font-size="12" font-weight="bold" text-anchor="middle" fill="white">配車依頼</text>
+  
+  <rect x="150" y="679" width="80" height="40" rx="8" ry="8" fill="#f0f0f0"/>
+  <text x="190" y="705" font-family="system-ui" font-size="12" text-anchor="middle" fill="#666">設定</text>
+  
+  <rect x="250" y="679" width="75" height="40" rx="8" ry="8" fill="#f0f0f0"/>
+  <text x="287.5" y="705" font-family="system-ui" font-size="12" text-anchor="middle" fill="#666">履歴</text>
+</svg>

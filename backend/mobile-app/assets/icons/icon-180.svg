@@ -1,0 +1,43 @@
+<svg width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone App Icon 180x180 (60pt @3x for iPhone) -->
+  <defs>
+    <linearGradient id="bgGradient180" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow180" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3"/>
+      <feComposite in2="offsetblur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <rect width="180" height="180" fill="url(#bgGradient180)"/>
+  
+  <!-- AI Badge -->
+  <g transform="rotate(-15 123 35)">
+    <rect x="109" y="25" width="28" height="21" rx="10" fill="#FFD700" filter="url(#shadow180)"/>
+    <text x="123" y="38" font-family="Arial Black, sans-serif" font-size="13" font-weight="900" text-anchor="middle" fill="#333">AI</text>
+  </g>
+  
+  <!-- Taxi -->
+  <g transform="translate(90, 70)">
+    <rect x="-26" y="-11" width="52" height="21" rx="5" fill="#FDB813" filter="url(#shadow180)"/>
+    <rect x="-10" y="-18" width="20" height="7" rx="2" fill="#333" filter="url(#shadow180)"/>
+    <text x="0" y="-12" font-family="Arial, sans-serif" font-size="4" font-weight="bold" text-anchor="middle" fill="#FDB813">TAXI</text>
+    <rect x="-21" y="-7" width="14" height="10" rx="2" fill="#4A90E2" opacity="0.7"/>
+    <rect x="-3" y="-7" width="14" height="10" rx="2" fill="#4A90E2" opacity="0.7"/>
+    <rect x="11" y="-7" width="14" height="10" rx="2" fill="#4A90E2" opacity="0.7"/>
+    <circle cx="-16" cy="11" r="5" fill="#333"/>
+    <circle cx="16" cy="11" r="5" fill="#333"/>
+  </g>
+  
+  <text x="90" y="114" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="18" font-weight="900" text-anchor="middle" fill="white" filter="url(#shadow180)">全国AI</text>
+  <text x="90" y="135" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="18" font-weight="900" text-anchor="middle" fill="white" filter="url(#shadow180)">タクシー</text>
+  <text x="90" y="151" font-family="Hiragino Sans, Arial, sans-serif" font-size="8" font-weight="600" text-anchor="middle" fill="rgba(255,255,255,0.9)">次世代配車</text>
+</svg>

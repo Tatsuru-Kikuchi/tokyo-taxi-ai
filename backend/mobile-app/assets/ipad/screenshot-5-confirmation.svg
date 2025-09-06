@@ -1,0 +1,40 @@
+<svg width="2048" height="2732" viewBox="0 0 2048 2732" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="2048" height="2732" fill="white"/>
+  
+  <!-- Success Icon -->
+  <text x="1024" y="500" font-family="Arial" font-size="300" text-anchor="middle">🎉</text>
+  
+  <!-- Title -->
+  <text x="1024" y="700" font-family="Hiragino Sans, Arial" font-size="120" font-weight="bold" text-anchor="middle" fill="#333">配車確定</text>
+  
+  <!-- Confirmation Box -->
+  <rect x="400" y="850" width="1248" height="400" rx="60" fill="#002060"/>
+  <text x="1024" y="1000" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="rgba(255,255,255,0.8)">確認番号</text>
+  <text x="1024" y="1150" font-family="Hiragino Sans, Arial" font-size="180" font-weight="bold" text-anchor="middle" fill="white" letter-spacing="20">7834</text>
+  
+  <!-- Driver Info Box -->
+  <rect x="200" y="1350" width="1648" height="700" rx="40" fill="#e8f4fd" stroke="#2196f3" stroke-width="4"/>
+  
+  <text x="300" y="1500" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" fill="#333">🚕 田中運転手</text>
+  
+  <text x="350" y="1650" font-family="Hiragino Sans, Arial" font-size="56" fill="#666">到着予定:</text>
+  <text x="800" y="1650" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">3分</text>
+  
+  <text x="350" y="1750" font-family="Hiragino Sans, Arial" font-size="56" fill="#666">車両:</text>
+  <text x="800" y="1750" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">トヨタ プリウス</text>
+  
+  <text x="350" y="1850" font-family="Hiragino Sans, Arial" font-size="56" fill="#666">ナンバー:</text>
+  <text x="800" y="1850" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">品川 500 あ 12-34</text>
+  
+  <text x="350" y="1950" font-family="Hiragino Sans, Arial" font-size="56" fill="#666">評価:</text>
+  <text x="800" y="1950" font-family="Hiragino Sans, Arial" font-size="56" font-weight="bold" fill="#333">⭐⭐⭐⭐⭐ 4.8</text>
+  
+  <!-- Savings Badge -->
+  <rect x="200" y="2150" width="1648" height="200" rx="40" fill="#28a745"/>
+  <text x="1024" y="2280" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" text-anchor="middle" fill="white">💰 GOより¥1,380お得でした！</text>
+  
+  <!-- Instructions -->
+  <text x="1024" y="2500" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="#666">ドライバーが到着したら</text>
+  <text x="1024" y="2580" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="#666">確認番号をお見せください</text>
+</svg>
