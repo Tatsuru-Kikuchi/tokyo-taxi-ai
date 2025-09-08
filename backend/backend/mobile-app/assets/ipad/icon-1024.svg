@@ -1,0 +1,51 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10"/>
+      <feOffset dx="0" dy="10" result="offsetblur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3"/>
+      <feComposite in2="offsetblur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bgGradient)"/>
+  
+  <!-- AI Badge -->
+  <g transform="rotate(-15 700 200)">
+    <rect x="620" y="140" width="160" height="120" rx="60" fill="#FFD700" filter="url(#shadow)"/>
+    <text x="700" y="215" font-family="Arial Black, sans-serif" font-size="72" font-weight="900" text-anchor="middle" fill="#333">AI</text>
+  </g>
+  
+  <!-- Taxi Emoji (simplified representation) -->
+  <g transform="translate(512, 400)">
+    <!-- Taxi body -->
+    <rect x="-150" y="-60" width="300" height="120" rx="30" fill="#FDB813" filter="url(#shadow)"/>
+    <!-- Taxi sign -->
+    <rect x="-60" y="-100" width="120" height="40" rx="10" fill="#333" filter="url(#shadow)"/>
+    <text x="0" y="-70" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#FDB813">TAXI</text>
+    <!-- Windows -->
+    <rect x="-120" y="-40" width="80" height="60" rx="10" fill="#4A90E2" opacity="0.7"/>
+    <rect x="-20" y="-40" width="80" height="60" rx="10" fill="#4A90E2" opacity="0.7"/>
+    <rect x="60" y="-40" width="80" height="60" rx="10" fill="#4A90E2" opacity="0.7"/>
+    <!-- Wheels -->
+    <circle cx="-90" cy="60" r="30" fill="#333"/>
+    <circle cx="90" cy="60" r="30" fill="#333"/>
+  </g>
+  
+  <!-- App name -->
+  <text x="512" y="650" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="100" font-weight="900" text-anchor="middle" fill="white" filter="url(#shadow)">全国AI</text>
+  <text x="512" y="770" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="100" font-weight="900" text-anchor="middle" fill="white" filter="url(#shadow)">タクシー</text>
+  
+  <!-- Subtitle -->
+  <text x="512" y="860" font-family="Hiragino Sans, Arial, sans-serif" font-size="48" font-weight="600" text-anchor="middle" fill="rgba(255,255,255,0.9)">次世代配車</text>
+</svg>

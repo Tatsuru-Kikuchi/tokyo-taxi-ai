@@ -5,10 +5,10 @@
   },
   "build": {
     "production": {
+      "node": "18.20.0",
       "ios": {
-        "autoIncrement": true
-      },
-      "android": {
+        "resourceClass": "m-medium",
+        "buildConfiguration": "Release",
         "autoIncrement": true
       }
     }

@@ -1,0 +1,46 @@
+<svg width="2048" height="2732" viewBox="0 0 2048 2732" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <rect width="2048" height="2732" fill="url(#bg4)"/>
+  
+  <!-- Title -->
+  <text x="1024" y="400" font-family="Hiragino Sans, Arial" font-size="140" font-weight="900" text-anchor="middle" fill="white">革新的な機能</text>
+  
+  <!-- Feature Grid -->
+  <!-- AI Feature -->
+  <rect x="200" y="600" width="800" height="700" rx="60" fill="rgba(255,255,255,0.95)"/>
+  <text x="600" y="800" font-family="Arial" font-size="140" text-anchor="middle">🤖</text>
+  <text x="600" y="950" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" text-anchor="middle" fill="#333">AI需要予測</text>
+  <text x="600" y="1050" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">リアルタイムで</text>
+  <text x="600" y="1120" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">最適な配車エリアを提案</text>
+  
+  <!-- Train Feature -->
+  <rect x="1048" y="600" width="800" height="700" rx="60" fill="rgba(255,255,255,0.95)"/>
+  <text x="1448" y="800" font-family="Arial" font-size="140" text-anchor="middle">🚆</text>
+  <text x="1448" y="950" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" text-anchor="middle" fill="#333">電車連携</text>
+  <text x="1448" y="1050" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">到着3分前に</text>
+  <text x="1448" y="1120" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">自動で配車リクエスト</text>
+  
+  <!-- Weather Feature -->
+  <rect x="200" y="1400" width="800" height="700" rx="60" fill="rgba(255,255,255,0.95)"/>
+  <text x="600" y="1600" font-family="Arial" font-size="140" text-anchor="middle">☔</text>
+  <text x="600" y="1750" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" text-anchor="middle" fill="#333">天気連動料金</text>
+  <text x="600" y="1850" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">雨天時の需要に応じた</text>
+  <text x="600" y="1920" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">ダイナミック料金</text>
+  
+  <!-- Cost Feature -->
+  <rect x="1048" y="1400" width="800" height="700" rx="60" fill="rgba(255,255,255,0.95)"/>
+  <text x="1448" y="1600" font-family="Arial" font-size="140" text-anchor="middle">💰</text>
+  <text x="1448" y="1750" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" text-anchor="middle" fill="#333">業界最安</text>
+  <text x="1448" y="1850" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">手数料わずか15%</text>
+  <text x="1448" y="1920" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="#666">GOより圧倒的にお得</text>
+  
+  <!-- Call to Action -->
+  <text x="1024" y="2400" font-family="Hiragino Sans, Arial" font-size="80" font-weight="bold" text-anchor="middle" fill="white">今すぐダウンロード</text>
+  <text x="1024" y="2520" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="rgba(255,255,255,0.9)">全国47都道府県対応予定</text>
+</svg>

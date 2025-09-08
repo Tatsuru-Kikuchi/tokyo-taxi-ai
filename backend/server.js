@@ -8,6 +8,10 @@ const socketIo = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const { Pool } = require('pg');
+<<<<<<< HEAD
+const trainRoutes = require('./routes/trains');
+=======
+>>>>>>> 697315f899bc57bfa781e36c252c3b1623a5c24b
 
 // ========================================
 // EXPRESS APP SETUP
@@ -22,6 +26,11 @@ const io = socketIo(server, {
   }
 });
 
+<<<<<<< HEAD
+app.use('/api/trains', trainRoutes);
+
+=======
+>>>>>>> 697315f899bc57bfa781e36c252c3b1623a5c24b
 // ========================================
 // LOAD ALL 8,604 STATIONS
 // ========================================

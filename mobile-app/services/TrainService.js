@@ -1,496 +1,537 @@
-/**
- * TrainService.js - 全国AIタクシー Train Integration Service
- * Version: 3.0.1
- * Created: September 3, 2025
- *
- * This service handles all train-related functionality including:
- * - Real-time train arrivals
- * - Delay detection
- * - Auto-booking for delayed trains
- * - Platform-specific pickup points
- *
- * Currently using mock data - ready for real API integration
- */
-
+// services/TrainService.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import stationMapper from '../utils/station_mapping';
 
-const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+const ODPT_API_KEY = 'pv3srzgo4tfolzf0a323n4zmsng5j1gl81yk3mwwrirfxzfxjqbsc5ki0byh0xn6'; // Replace with your actual key
+const ODPT_BASE_URL = 'https://api.odpt.org/api/v4';
+const CACHE_DURATION = 60000; // 1 minute cache
 
 class TrainService {
   constructor() {
-    // Train line definitions with official colors
-    this.trainLines = {
-      'JR_YAMANOTE': {
-        name: '山手線',
-        nameEn: 'Yamanote Line',
-        color: '#9ACD32',
-        avgInterval: 3,
-        operator: 'JR East'
-      },
-      'JR_CHUO': {
-        name: '中央線',
-        nameEn: 'Chuo Line',
-        color: '#FFA500',
-        avgInterval: 4,
-        operator: 'JR East'
-      },
-      'JR_KEIHIN_TOHOKU': {
-        name: '京浜東北線',
-        nameEn: 'Keihin-Tohoku Line',
-        color: '#00BFFF',
-        avgInterval: 3,
-        operator: 'JR East'
-      },
-      'JR_SOBU': {
-        name: '総武線',
-        nameEn: 'Sobu Line',
-        color: '#FFD700',
-        avgInterval: 4,
-        operator: 'JR East'
-      },
-      'METRO_GINZA': {
-        name: '銀座線',
-        nameEn: 'Ginza Line',
-        color: '#FF9500',
-        avgInterval: 3,
-        operator: 'Tokyo Metro'
-      },
-      'METRO_MARUNOUCHI': {
-        name: '丸ノ内線',
-        nameEn: 'Marunouchi Line',
-        color: '#FF0000',
-        avgInterval: 4,
-        operator: 'Tokyo Metro'
-      },
-      'METRO_HIBIYA': {
-        name: '日比谷線',
-        nameEn: 'Hibiya Line',
-        color: '#B5B5AC',
-        avgInterval: 3,
-        operator: 'Tokyo Metro'
-      },
-      'TOEI_OEDO': {
-        name: '大江戸線',
-        nameEn: 'Oedo Line',
-        color: '#CE0067',
-        avgInterval: 5,
-        operator: 'Toei'
-      }
-    };
+    this.cache = new Map();
+    this.delaySubscriptions = new Map();
 
-    // Station platform configurations
-    this.stationPlatforms = {
-      'tokyo': {
-        name: '東京駅',
-        platforms: {
-          '1番線': { lines: ['JR_YAMANOTE'], direction: '品川・渋谷方面' },
-          '2番線': { lines: ['JR_YAMANOTE'], direction: '上野・池袋方面' },
-          '3番線': { lines: ['JR_KEIHIN_TOHOKU'], direction: '大宮方面' },
-          '4番線': { lines: ['JR_KEIHIN_TOHOKU'], direction: '大船方面' },
-          '7番線': { lines: ['JR_CHUO'], direction: '新宿・立川方面' },
-          '8番線': { lines: ['JR_CHUO'], direction: '千葉方面' }
-        }
-      },
-      'shinjuku': {
-        name: '新宿駅',
-        platforms: {
-          '14番線': { lines: ['JR_YAMANOTE'], direction: '渋谷・品川方面' },
-          '15番線': { lines: ['JR_YAMANOTE'], direction: '池袋・上野方面' },
-          '7番線': { lines: ['JR_CHUO'], direction: '東京方面' },
-          '8番線': { lines: ['JR_CHUO'], direction: '立川・八王子方面' }
-        }
-      },
-      'shibuya': {
-        name: '渋谷駅',
-        platforms: {
-          '1番線': { lines: ['JR_YAMANOTE'], direction: '新宿・池袋方面' },
-          '2番線': { lines: ['JR_YAMANOTE'], direction: '品川・東京方面' }
-        }
-      }
-    };
-
-    // Delay patterns (for realistic mock data)
-    this.delayPatterns = {
-      morning_rush: { start: 7, end: 9, probability: 0.3, avgDelay: 5 },
-      evening_rush: { start: 17, end: 20, probability: 0.4, avgDelay: 7 },
-      rain: { probability: 0.5, avgDelay: 10 },
-      accident: { probability: 0.1, avgDelay: 20 }
+    // Clean line name mappings
+    this.lineNameMap = {
+      'odpt.Railway:JR-East.Yamanote': '山手線',
+      'odpt.Railway:JR-East.ChuoRapid': '中央線快速',
+      'odpt.Railway:JR-East.Keihin-Tohoku': '京浜東北線',
+      'odpt.Railway:JR-East.Sobu': '総武線',
+      'odpt.Railway:JR-East.Tokaido': '東海道線',
+      'odpt.Railway:JR-East.Yokosuka': '横須賀線',
+      'odpt.Railway:JR-East.Shonan-Shinjuku': '湘南新宿ライン',
+      'odpt.Railway:TokyoMetro.Ginza': '銀座線',
+      'odpt.Railway:TokyoMetro.Marunouchi': '丸ノ内線',
+      'odpt.Railway:TokyoMetro.Hibiya': '日比谷線',
+      'odpt.Railway:TokyoMetro.Tozai': '東西線',
+      'odpt.Railway:TokyoMetro.Chiyoda': '千代田線',
+      'odpt.Railway:TokyoMetro.Yurakucho': '有楽町線',
+      'odpt.Railway:TokyoMetro.Hanzomon': '半蔵門線',
+      'odpt.Railway:TokyoMetro.Namboku': '南北線',
+      'odpt.Railway:TokyoMetro.Fukutoshin': '副都心線',
+      'odpt.Railway:Toei.Asakusa': '浅草線',
+      'odpt.Railway:Toei.Mita': '三田線',
+      'odpt.Railway:Toei.Shinjuku': '新宿線',
+      'odpt.Railway:Toei.Oedo': '大江戸線',
+      'odpt.Railway:Tokyu.Toyoko': '東急東横線',
+      'odpt.Railway:Tokyu.Den-en-toshi': '東急田園都市線',
+      'odpt.Railway:Keio.Keio': '京王線',
+      'odpt.Railway:Odakyu.Odawara': '小田急線',
+      'odpt.Railway:Seibu.Ikebukuro': '西武池袋線',
+      'odpt.Railway:Seibu.Shinjuku': '西武新宿線',
+      'odpt.Railway:Tobu.Tojo': '東武東上線',
+      'odpt.Railway:Keisei.Main': '京成本線',
+      'odpt.Railway:Keikyu.Main': '京急本線'
     };
   }
 
-  /**
-   * Get real-time train arrivals for a station
-   */
-  async getTrainArrivals(stationId) {
-    try {
-      // Try to fetch from backend first
-      const response = await fetch(`${BACKEND_URL}/api/trains/schedule?station=${stationId}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 5000
-      });
+  // Get train lines for a station using the mapping
+  async getStationLines(stationName) {
+    const cacheKey = `lines_${stationName}`;
+    const cached = this.getFromCache(cacheKey);
+    if (cached) return cached;
 
-      if (response.ok) {
-        const data = await response.json();
-        return this.formatTrainArrivals(data);
+    try {
+      // First try to get from station mapper
+      const mappedLines = stationMapper.getLinesByStation(stationName);
+
+      if (mappedLines.length > 0) {
+        const lines = mappedLines.map(lineId => ({
+          id: lineId,
+          name: this.getCleanLineName(lineId),
+          operator: this.extractOperatorFromId(lineId),
+          color: this.getLineColor(lineId)
+        }));
+
+        this.setCache(cacheKey, lines);
+        return lines;
       }
+
+      // Fallback to API if not in mapping
+      const response = await fetch(
+        `${ODPT_BASE_URL}/odpt:Station?dc:title=${encodeURIComponent(stationName)}&acl:consumerKey=${ODPT_API_KEY}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch station data');
+
+      const data = await response.json();
+      const lines = this.extractLinesFromStation(data);
+
+      this.setCache(cacheKey, lines);
+      return lines;
     } catch (error) {
-      console.log('Using mock data due to:', error.message);
+      console.error('Error fetching station lines:', error);
+      return this.getMockStationLines(stationName);
+    }
+  }
+
+  // Get clean Japanese line name
+  getCleanLineName(lineId) {
+    // Return mapped name if exists
+    if (this.lineNameMap[lineId]) {
+      return this.lineNameMap[lineId];
     }
 
-    // Generate realistic mock data based on time and conditions
-    return this.generateMockArrivals(stationId);
+    // Try to extract and clean from ID
+    const parts = lineId.split(':');
+    if (parts.length > 1) {
+      const operatorAndLine = parts[1];
+      const linePart = operatorAndLine.split('.').pop();
+
+      // Common line name replacements
+      const replacements = {
+        'Yamanote': '山手線',
+        'ChuoRapid': '中央線快速',
+        'Sobu': '総武線',
+        'Tokaido': '東海道線',
+        'Main': '本線'
+      };
+
+      return replacements[linePart] || linePart;
+    }
+
+    return '不明な路線';
   }
 
-  /**
-   * Generate mock train arrivals with realistic patterns
-   */
-  generateMockArrivals(stationId) {
+  // Extract operator from ODPT ID
+  extractOperatorFromId(lineId) {
+    const parts = lineId.split(':');
+    if (parts.length > 1) {
+      const operator = parts[1].split('.')[0];
+      const operatorNames = {
+        'JR-East': 'JR東日本',
+        'JR-West': 'JR西日本',
+        'JR-Central': 'JR東海',
+        'JR-Kyushu': 'JR九州',
+        'JR-Hokkaido': 'JR北海道',
+        'TokyoMetro': '東京メトロ',
+        'Toei': '都営',
+        'OsakaMetro': '大阪メトロ',
+        'Tokyu': '東急',
+        'Keio': '京王',
+        'Odakyu': '小田急',
+        'Seibu': '西武',
+        'Tobu': '東武',
+        'Keisei': '京成',
+        'Keikyu': '京急',
+        'Hankyu': '阪急',
+        'Hanshin': '阪神',
+        'Kintetsu': '近鉄',
+        'Nankai': '南海',
+        'Meitetsu': '名鉄'
+      };
+      return operatorNames[operator] || operator;
+    }
+    return '不明';
+  }
+
+  // Get real-time train information
+  async getTrainInfo(lineId) {
+    const cacheKey = `train_${lineId}`;
+    const cached = this.getFromCache(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const response = await fetch(
+        `${ODPT_BASE_URL}/odpt:Train?odpt:railway=${lineId}&acl:consumerKey=${ODPT_API_KEY}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch train data');
+
+      const data = await response.json();
+      const trainInfo = this.processTrainData(data);
+
+      this.setCache(cacheKey, trainInfo, 30000); // 30 second cache for real-time data
+      return trainInfo;
+    } catch (error) {
+      console.error('Error fetching train info:', error);
+      return this.getMockTrainInfo(lineId);
+    }
+  }
+
+  // Check for delays on specific lines
+  async checkDelays(stationName, lines = []) {
+    try {
+      const delayPromises = lines.map(line => this.getDelayInfo(line));
+      const delayResults = await Promise.all(delayPromises);
+
+      const delays = delayResults.filter(d => d.isDelayed);
+
+      if (delays.length > 0) {
+        await this.saveDelayNotification(stationName, delays);
+      }
+
+      return {
+        hasDelays: delays.length > 0,
+        delays: delays,
+        affectedLines: delays.map(d => d.lineName),
+        maxDelay: Math.max(...delays.map(d => d.delayMinutes), 0),
+        recommendation: this.getRecommendation(delays)
+      };
+    } catch (error) {
+      console.error('Error checking delays:', error);
+      return this.getMockDelayStatus();
+    }
+  }
+
+  // Get delay information for a specific line
+  async getDelayInfo(lineId) {
+    try {
+      const response = await fetch(
+        `${ODPT_BASE_URL}/odpt:TrainInformation?odpt:railway=${lineId}&acl:consumerKey=${ODPT_API_KEY}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch delay info');
+
+      const data = await response.json();
+      return this.processDelayData(data[0] || {}, lineId);
+    } catch (error) {
+      console.error('Error fetching delay info:', error);
+      return {
+        isDelayed: false,
+        lineName: this.getCleanLineName(lineId),
+        delayMinutes: 0
+      };
+    }
+  }
+
+  // Get next trains from a station
+  async getNextTrains(stationName, direction = null) {
+    const cacheKey = `next_${stationName}_${direction}`;
+    const cached = this.getFromCache(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const response = await fetch(
+        `${ODPT_BASE_URL}/odpt:StationTimetable?odpt:station=${stationName}&acl:consumerKey=${ODPT_API_KEY}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch timetable');
+
+      const data = await response.json();
+      const nextTrains = this.processTimeTable(data, direction);
+
+      this.setCache(cacheKey, nextTrains);
+      return nextTrains;
+    } catch (error) {
+      console.error('Error fetching next trains:', error);
+      return this.getMockNextTrains(stationName);
+    }
+  }
+
+  // Subscribe to delay notifications for a station
+  async subscribeToDelays(stationName, callback) {
+    const subscriptionId = `${stationName}_${Date.now()}`;
+
+    const checkInterval = setInterval(async () => {
+      const lines = await this.getStationLines(stationName);
+      const delayStatus = await this.checkDelays(stationName, lines.map(l => l.id));
+
+      if (delayStatus.hasDelays) {
+        callback(delayStatus);
+      }
+    }, 60000); // Check every minute
+
+    this.delaySubscriptions.set(subscriptionId, checkInterval);
+    return subscriptionId;
+  }
+
+  // Unsubscribe from delay notifications
+  unsubscribeFromDelays(subscriptionId) {
+    const interval = this.delaySubscriptions.get(subscriptionId);
+    if (interval) {
+      clearInterval(interval);
+      this.delaySubscriptions.delete(subscriptionId);
+    }
+  }
+
+  // Process and extract data methods
+  extractLinesFromStation(stationData) {
+    if (!stationData || stationData.length === 0) return [];
+
+    return stationData.map(station => ({
+      id: station['odpt:railway'],
+      name: this.getCleanLineName(station['odpt:railway']),
+      operator: station['odpt:operator'],
+      color: this.getLineColor(station['odpt:railway'])
+    }));
+  }
+
+  processTrainData(trainData) {
+    return trainData.map(train => ({
+      trainNumber: train['odpt:trainNumber'],
+      trainType: train['odpt:trainType'],
+      destination: train['odpt:destinationStation']?.[0],
+      currentStation: train['odpt:fromStation'],
+      delay: train['odpt:delay'] || 0,
+      delayMinutes: Math.floor((train['odpt:delay'] || 0) / 60),
+      direction: train['odpt:railDirection'],
+      updatedAt: train['dc:date']
+    }));
+  }
+
+  processDelayData(delayInfo, lineId) {
+    const hasDelay = delayInfo['odpt:trainInformationStatus']?.ja !== '平常運転';
+    const delayText = delayInfo['odpt:trainInformationText']?.ja || '';
+
+    // Extract delay minutes from text (e.g., "約10分の遅れ")
+    const delayMatch = delayText.match(/約?(\d+)分/);
+    const delayMinutes = delayMatch ? parseInt(delayMatch[1]) : 0;
+
+    // Clean up the description - remove technical terms
+    let cleanDescription = delayText
+      .replace(/odpt\.[^、。\s]*/g, '') // Remove odpt references
+      .replace(/Railway:[^、。\s]*/g, '') // Remove Railway references
+      .trim();
+
+    // If no clean description, provide a simple one
+    if (!cleanDescription || cleanDescription.length < 5) {
+      if (delayMinutes > 0) {
+        cleanDescription = '混雑のため遅延しています';
+      } else if (hasDelay) {
+        cleanDescription = '運転を見合わせています';
+      } else {
+        cleanDescription = '正常運転';
+      }
+    }
+
+    return {
+      isDelayed: hasDelay || delayMinutes > 0,
+      lineName: this.getCleanLineName(lineId),
+      delayMinutes: delayMinutes,
+      status: delayInfo['odpt:trainInformationStatus']?.ja || '情報なし',
+      description: cleanDescription,
+      updatedAt: delayInfo['dc:date']
+    };
+  }
+
+  processTimeTable(timetableData, direction) {
     const now = new Date();
-    const hour = now.getHours();
-    const station = this.stationPlatforms[stationId] || this.stationPlatforms['tokyo'];
-    const arrivals = [];
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
 
-    // Generate arrivals for each platform
-    Object.entries(station.platforms).forEach(([platform, config]) => {
-      config.lines.forEach(lineId => {
-        const line = this.trainLines[lineId];
-        if (!line) return;
+    const allTrains = [];
 
-        // Generate next 3 trains for this line/platform
-        for (let i = 0; i < 3; i++) {
-          const baseInterval = line.avgInterval;
-          const minutesUntilArrival = baseInterval * (i + 1) + Math.floor(Math.random() * 2);
+    timetableData.forEach(timetable => {
+      const weekdayTable = timetable['odpt:weekdays'] || [];
+      const trains = weekdayTable.filter(train => {
+        const time = train['odpt:departureTime'];
+        if (!time) return false;
 
-          // Determine if this train is delayed
-          const delayInfo = this.calculateDelay(hour);
+        const [hour, minute] = time.split(':').map(Number);
+        return hour > currentHour || (hour === currentHour && minute >= currentMinute);
+      }).slice(0, 5);
 
-          arrivals.push({
-            trainId: `${lineId}_${Date.now()}_${i}`,
-            line: lineId,
-            lineName: line.name,
-            lineColor: line.color,
-            platform: platform,
-            destination: config.direction,
-            arrivalTime: new Date(now.getTime() + minutesUntilArrival * 60000).toISOString(),
-            arrivalMinutes: minutesUntilArrival,
-            status: delayInfo.isDelayed ? 'delayed' : 'on_time',
-            delayMinutes: delayInfo.delayMinutes,
-            delayReason: delayInfo.reason,
-            crowdLevel: this.calculateCrowdLevel(hour, delayInfo.isDelayed),
-            nextStation: this.getNextStation(lineId, stationId, config.direction),
-            operator: line.operator
-          });
-        }
+      trains.forEach(train => {
+        allTrains.push({
+          departureTime: train['odpt:departureTime'],
+          destination: train['odpt:destinationStation']?.[0],
+          trainType: train['odpt:trainType'],
+          platform: train['odpt:platformNumber']
+        });
       });
     });
 
-    // Sort by arrival time
-    return arrivals.sort((a, b) => a.arrivalMinutes - b.arrivalMinutes);
+    return allTrains.sort((a, b) =>
+      a.departureTime.localeCompare(b.departureTime)
+    ).slice(0, 5);
   }
 
-  /**
-   * Calculate delay based on time and conditions
-   */
-  calculateDelay(hour) {
-    // Check rush hour patterns
-    const isMorningRush = hour >= 7 && hour <= 9;
-    const isEveningRush = hour >= 17 && hour <= 20;
+  getRecommendation(delays) {
+    if (delays.length === 0) return null;
 
-    let isDelayed = false;
-    let delayMinutes = 0;
-    let reason = '';
+    const maxDelay = Math.max(...delays.map(d => d.delayMinutes));
 
-    if (isMorningRush && Math.random() < 0.3) {
-      isDelayed = true;
-      delayMinutes = 3 + Math.floor(Math.random() * 7);
-      reason = '混雑のため';
-    } else if (isEveningRush && Math.random() < 0.4) {
-      isDelayed = true;
-      delayMinutes = 5 + Math.floor(Math.random() * 10);
-      reason = '混雑のため';
-    } else if (Math.random() < 0.1) {
-      isDelayed = true;
-      delayMinutes = 10 + Math.floor(Math.random() * 20);
-      reason = '信号確認のため';
+    if (maxDelay >= 30) {
+      return {
+        type: 'urgent',
+        message: '30分以上の遅延。タクシーの利用を強く推奨します。',
+        action: 'auto_book'
+      };
+    } else if (maxDelay >= 15) {
+      return {
+        type: 'recommended',
+        message: '15分以上の遅延。タクシーの利用をお勧めします。',
+        action: 'suggest_book'
+      };
+    } else if (maxDelay >= 10) {
+      return {
+        type: 'info',
+        message: '10分程度の遅延が発生しています。',
+        action: 'monitor'
+      };
     }
 
-    return { isDelayed, delayMinutes, reason };
+    return null;
   }
 
-  /**
-   * Calculate crowd level based on time and delays
-   */
-  calculateCrowdLevel(hour, isDelayed) {
-    const isMorningRush = hour >= 7 && hour <= 9;
-    const isEveningRush = hour >= 17 && hour <= 20;
-
-    if (isDelayed) return 'very_high';
-    if (isMorningRush || isEveningRush) return 'high';
-    if (hour >= 10 && hour <= 16) return 'medium';
-    return 'low';
+  // Cache management
+  setCache(key, data, duration = CACHE_DURATION) {
+    this.cache.set(key, {
+      data: data,
+      expiry: Date.now() + duration
+    });
   }
 
-  /**
-   * Get next station for a train
-   */
-  getNextStation(lineId, currentStation, direction) {
-    const stationSequence = {
-      'JR_YAMANOTE': {
-        '品川・渋谷方面': ['有楽町', '新橋', '浜松町', '田町', '品川'],
-        '上野・池袋方面': ['神田', '秋葉原', '御徒町', '上野', '鶯谷']
-      }
-    };
+  getFromCache(key) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
 
-    const sequence = stationSequence[lineId]?.[direction];
-    return sequence ? sequence[0] : '次駅';
-  }
-
-  /**
-   * Check for train delays and notify user
-   */
-  async checkDelays(stationId, lineId) {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/trains/delays`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stationId, lineId }),
-        timeout: 5000
-      });
-
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch (error) {
-      console.log('Using mock delay data:', error.message);
+    if (Date.now() > cached.expiry) {
+      this.cache.delete(key);
+      return null;
     }
 
-    // Mock delay data
-    const hour = new Date().getHours();
-    const delayInfo = this.calculateDelay(hour);
-
-    return {
-      hasDelay: delayInfo.isDelayed,
-      delayMinutes: delayInfo.delayMinutes,
-      reason: delayInfo.reason,
-      affectedLines: [lineId],
-      recoveryTime: new Date(Date.now() + (delayInfo.delayMinutes + 15) * 60000).toISOString(),
-      recommendation: delayInfo.isDelayed ? 'タクシー利用をお勧めします' : null
-    };
+    return cached.data;
   }
 
-  /**
-   * Auto-schedule taxi based on train arrival
-   */
-  async scheduleTaxiForTrain(trainArrival, destination, advanceMinutes = 3) {
-    try {
-      const arrivalTime = new Date(trainArrival.arrivalTime);
-      const pickupTime = new Date(arrivalTime.getTime() - (advanceMinutes * 60000));
+  clearCache() {
+    this.cache.clear();
+  }
 
-      const booking = {
-        bookingId: `BOOK_${Date.now()}`,
-        trainId: trainArrival.trainId,
-        trainLine: trainArrival.lineName,
-        trainArrivalTime: trainArrival.arrivalTime,
-        platform: trainArrival.platform,
-        scheduledPickupTime: pickupTime.toISOString(),
-        pickupLocation: this.getPickupPoint(trainArrival.station, trainArrival.platform),
-        destination: destination,
-        estimatedFare: this.calculateEstimatedFare(trainArrival.crowdLevel),
-        status: 'scheduled',
-        autoBooked: true,
-        createdAt: new Date().toISOString()
+  // Save delay notification to AsyncStorage
+  async saveDelayNotification(stationName, delays) {
+    try {
+      const notification = {
+        id: Date.now().toString(),
+        stationName: stationName,
+        delays: delays,
+        timestamp: new Date().toISOString(),
+        read: false
       };
 
-      // Save to local storage
-      await this.saveScheduledBooking(booking);
+      const existingNotifications = await AsyncStorage.getItem('delayNotifications');
+      const notifications = existingNotifications ? JSON.parse(existingNotifications) : [];
 
-      // Send to backend
-      try {
-        const response = await fetch(`${BACKEND_URL}/api/bookings/train-sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(booking),
-          timeout: 5000
-        });
+      notifications.unshift(notification);
+      notifications.splice(10); // Keep only last 10 notifications
 
-        if (response.ok) {
-          const serverBooking = await response.json();
-          booking.bookingId = serverBooking.id || booking.bookingId;
-        }
-      } catch (error) {
-        console.log('Booking saved locally, will sync later:', error.message);
-      }
-
-      return booking;
+      await AsyncStorage.setItem('delayNotifications', JSON.stringify(notifications));
+      return notification;
     } catch (error) {
-      console.error('Error scheduling taxi:', error);
-      throw error;
+      console.error('Error saving notification:', error);
     }
   }
 
-  /**
-   * Calculate estimated fare based on conditions
-   */
-  calculateEstimatedFare(crowdLevel) {
-    const baseFare = 1500;
-    const surgeMultiplier = {
-      'very_high': 1.5,
-      'high': 1.3,
-      'medium': 1.1,
-      'low': 1.0
-    };
-
-    return Math.round(baseFare * (surgeMultiplier[crowdLevel] || 1.0));
-  }
-
-  /**
-   * Get platform-specific pickup points
-   */
-  getPickupPoint(stationId, platform) {
-    const pickupPoints = {
-      'tokyo': {
-        '1番線': { exit: '八重洲北口', walkTime: 3, meetingPoint: 'タクシー乗り場A', gps: { lat: 35.6812, lng: 139.7671 } },
-        '2番線': { exit: '八重洲中央口', walkTime: 4, meetingPoint: 'タクシー乗り場B', gps: { lat: 35.6815, lng: 139.7675 } },
-        '3番線': { exit: '丸の内南口', walkTime: 5, meetingPoint: 'タクシー乗り場C', gps: { lat: 35.6810, lng: 139.7665 } },
-        'default': { exit: '中央口', walkTime: 5, meetingPoint: 'タクシー乗り場', gps: { lat: 35.6812, lng: 139.7671 } }
-      },
-      'shinjuku': {
-        '14番線': { exit: '南口', walkTime: 2, meetingPoint: '新南口タクシー乗り場', gps: { lat: 35.6896, lng: 139.7006 } },
-        '15番線': { exit: '東口', walkTime: 3, meetingPoint: '東口タクシー乗り場', gps: { lat: 35.6900, lng: 139.7010 } },
-        '7番線': { exit: '西口', walkTime: 4, meetingPoint: '西口タクシー乗り場', gps: { lat: 35.6890, lng: 139.7000 } },
-        'default': { exit: '南口', walkTime: 3, meetingPoint: 'タクシー乗り場', gps: { lat: 35.6896, lng: 139.7006 } }
-      },
-      'shibuya': {
-        '1番線': { exit: 'ハチ公口', walkTime: 2, meetingPoint: 'ハチ公前タクシー乗り場', gps: { lat: 35.6580, lng: 139.7016 } },
-        '2番線': { exit: '南口', walkTime: 3, meetingPoint: '南口タクシー乗り場', gps: { lat: 35.6575, lng: 139.7020 } },
-        'default': { exit: 'ハチ公口', walkTime: 3, meetingPoint: 'タクシー乗り場', gps: { lat: 35.6580, lng: 139.7016 } }
-      }
-    };
-
-    const stationPickup = pickupPoints[stationId] || pickupPoints['tokyo'];
-    return stationPickup[platform] || stationPickup['default'];
-  }
-
-  /**
-   * Save scheduled booking to local storage
-   */
-  async saveScheduledBooking(booking) {
+  // Get saved delay notifications
+  async getDelayNotifications() {
     try {
-      const existingBookings = await AsyncStorage.getItem('scheduledBookings');
-      const bookings = existingBookings ? JSON.parse(existingBookings) : [];
-
-      // Add new booking
-      bookings.push(booking);
-
-      // Keep only bookings from last 24 hours
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const recentBookings = bookings.filter(b =>
-        new Date(b.createdAt) > oneDayAgo
-      );
-
-      await AsyncStorage.setItem('scheduledBookings', JSON.stringify(recentBookings));
-      return true;
+      const notifications = await AsyncStorage.getItem('delayNotifications');
+      return notifications ? JSON.parse(notifications) : [];
     } catch (error) {
-      console.error('Error saving booking:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get all scheduled bookings
-   */
-  async getScheduledBookings() {
-    try {
-      const bookings = await AsyncStorage.getItem('scheduledBookings');
-      return bookings ? JSON.parse(bookings) : [];
-    } catch (error) {
-      console.error('Error loading bookings:', error);
+      console.error('Error getting notifications:', error);
       return [];
     }
   }
 
-  /**
-   * Cancel a scheduled booking
-   */
-  async cancelBooking(bookingId) {
-    try {
-      // Cancel on backend
-      try {
-        await fetch(`${BACKEND_URL}/api/bookings/${bookingId}/cancel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 5000
-        });
-      } catch (error) {
-        console.log('Backend cancellation failed, removing locally:', error.message);
-      }
-
-      // Remove from local storage
-      const bookings = await this.getScheduledBookings();
-      const filtered = bookings.filter(b => b.bookingId !== bookingId);
-      await AsyncStorage.setItem('scheduledBookings', JSON.stringify(filtered));
-
-      return true;
-    } catch (error) {
-      console.error('Error cancelling booking:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Format train arrivals for display
-   */
-  formatTrainArrivals(arrivals) {
-    return arrivals.map(arrival => ({
-      ...arrival,
-      displayTime: this.formatTime(arrival.arrivalTime),
-      crowdIcon: this.getCrowdIcon(arrival.crowdLevel),
-      statusColor: arrival.status === 'delayed' ? '#ff6b6b' : '#4CAF50'
-    }));
-  }
-
-  /**
-   * Format time for display
-   */
-  formatTime(isoTime) {
-    const date = new Date(isoTime);
-    return date.toLocaleTimeString('ja-JP', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
-
-  /**
-   * Get crowd level icon
-   */
-  getCrowdIcon(level) {
-    const icons = {
-      'very_high': '🔴',
-      'high': '🟠',
-      'medium': '🟡',
-      'low': '🟢'
+  // Line color mapping
+  getLineColor(lineId) {
+    const colorMap = {
+      'odpt.Railway:JR-East.Yamanote': '#9ACD32',
+      'odpt.Railway:JR-East.ChuoRapid': '#FFA500',
+      'odpt.Railway:JR-East.Keihin-Tohoku': '#00BFFF',
+      'odpt.Railway:JR-East.Sobu': '#FFD700',
+      'odpt.Railway:TokyoMetro.Ginza': '#FF9500',
+      'odpt.Railway:TokyoMetro.Marunouchi': '#FF0000',
+      'odpt.Railway:TokyoMetro.Hibiya': '#708090',
+      'odpt.Railway:TokyoMetro.Tozai': '#00BFFF',
+      'odpt.Railway:TokyoMetro.Chiyoda': '#00BB00',
+      'odpt.Railway:TokyoMetro.Yurakucho': '#D4AF37',
+      'odpt.Railway:TokyoMetro.Hanzomon': '#9B7CB6',
+      'odpt.Railway:TokyoMetro.Namboku': '#00ADA9',
+      'odpt.Railway:TokyoMetro.Fukutoshin': '#7B5544',
+      'odpt.Railway:Toei.Asakusa': '#EF4868',
+      'odpt.Railway:Toei.Mita': '#006BB3',
+      'odpt.Railway:Toei.Shinjuku': '#B0C24A',
+      'odpt.Railway:Toei.Oedo': '#CE045B'
     };
-    return icons[level] || '⚪';
+
+    return colorMap[lineId] || '#666666';
   }
 
-  /**
-   * Check if train service is available
-   */
-  async checkServiceStatus() {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/trains/status`, {
-        method: 'GET',
-        timeout: 3000
-      });
+  // Mock data fallbacks
+  getMockStationLines(stationName) {
+    return [
+      { id: 'odpt.Railway:JR-East.Yamanote', name: '山手線', operator: 'JR東日本', color: '#9ACD32' },
+      { id: 'odpt.Railway:JR-East.ChuoRapid', name: '中央線快速', operator: 'JR東日本', color: '#FFA500' }
+    ];
+  }
 
-      return response.ok;
-    } catch (error) {
-      console.log('Train service unavailable:', error.message);
-      return false;
+  getMockTrainInfo(lineId) {
+    return [
+      {
+        trainNumber: '1234',
+        trainType: '各駅停車',
+        destination: '東京',
+        currentStation: '新宿',
+        delay: 0,
+        delayMinutes: 0,
+        direction: '内回り',
+        updatedAt: new Date().toISOString()
+      }
+    ];
+  }
+
+  getMockDelayStatus() {
+    // Simulate delay 30% of the time for testing
+    const hasDelay = Math.random() > 0.7;
+    const delayMinutes = hasDelay ? Math.floor(Math.random() * 30) + 10 : 0;
+
+    return {
+      hasDelays: hasDelay,
+      delays: hasDelay ? [{
+        isDelayed: true,
+        lineName: '大江戸線',
+        delayMinutes: delayMinutes,
+        status: '遅延',
+        description: '混雑のため遅延しています'
+      }] : [],
+      affectedLines: hasDelay ? ['大江戸線'] : [],
+      maxDelay: delayMinutes,
+      recommendation: hasDelay ? {
+        type: delayMinutes >= 20 ? 'urgent' : 'recommended',
+        message: `${delayMinutes}分の遅延。タクシーの利用をお勧めします。`,
+        action: delayMinutes >= 20 ? 'auto_book' : 'suggest_book'
+      } : null
+    };
+  }
+
+  getMockNextTrains(stationName) {
+    const now = new Date();
+    const trains = [];
+
+    for (let i = 0; i < 5; i++) {
+      const departureTime = new Date(now.getTime() + (i * 3 + 2) * 60000);
+      trains.push({
+        departureTime: `${departureTime.getHours().toString().padStart(2, '0')}:${departureTime.getMinutes().toString().padStart(2, '0')}`,
+        destination: ['東京', '品川', '渋谷', '新宿', '池袋'][i % 5],
+        trainType: i % 3 === 0 ? '快速' : '各駅停車',
+        platform: (i % 2) + 1
+      });
     }
+
+    return trains;
   }
 }
 
-// Export singleton instance
 export default new TrainService();

@@ -8,29 +8,70 @@ import {
   Alert,
   Dimensions,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Linking
 } from 'react-native';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import CustomerScreen from './screens/CustomerScreen';
 import DriverScreen from './screens/DriverScreen';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
 
+// Backend URL from app.json
+const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || 'https://tokyo-taxi-ai-production.up.railway.app';
+
+// Configure notification handler
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
 export default function App() {
   const [mode, setMode] = useState(null);
   const [locationPermission, setLocationPermission] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [pushToken, setPushToken] = useState(null);
+  const [notification, setNotification] = useState(null);
 
   useEffect(() => {
     initializeApp();
+
+    // Listen for notifications
+    const notificationListener = Notifications.addNotificationReceivedListener(notification => {
+      setNotification(notification);
+      console.log('Notification received:', notification);
+    });
+
+    const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('Notification clicked:', response);
+      handleNotificationClick(response.notification);
+    });
+
+    return () => {
+      Notifications.removeNotificationSubscription(notificationListener);
+      Notifications.removeNotificationSubscription(responseListener);
+    };
   }, []);
 
   const initializeApp = async () => {
-    await requestLocationPermission();
-    setIsLoading(false);
+    try {
+      await requestLocationPermission();
+      await registerForPushNotifications();
+      await loadUserPreferences();
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Initialization error:', error);
+      setIsLoading(false);
+    }
   };
 
   const requestLocationPermission = async () => {
@@ -40,7 +81,11 @@ export default function App() {
       if (status !== 'granted') {
         Alert.alert(
           '位置情報の許可が必要です',
-          'タクシー配車には位置情報が必要です。設定から許可してください。'
+          'タクシー配車には位置情報が必要です。設定から許可してください。',
+          [
+            { text: 'キャンセル', style: 'cancel' },
+            { text: '設定を開く', onPress: () => Linking.openSettings() }
+          ]
         );
       }
     } catch (error) {
@@ -48,9 +93,99 @@ export default function App() {
     }
   };
 
-  const handleModeSelect = (selectedMode) => {
+  const registerForPushNotifications = async () => {
+    try {
+      // Skip push notifications on web
+      if (Platform.OS === 'web') {
+        console.log('Push notifications not supported on web');
+        return;
+      }
+
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        console.log('Failed to get push token for notifications');
+        return;
+      }
+
+      // Get Expo push token
+      const token = (await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId
+      })).data;
+      
+      console.log('Push token:', token);
+      setPushToken(token);
+      setNotificationPermission(true);
+
+      // Save token to backend
+      await savePushTokenToBackend(token);
+
+      // Save locally
+      await AsyncStorage.setItem('pushToken', token);
+
+      if (Platform.OS === 'android') {
+        Notifications.setNotificationChannelAsync('default', {
+          name: 'default',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#FFD700',
+        });
+      }
+    } catch (error) {
+      console.error('Push notification setup error:', error);
+    }
+  };
+
+  const savePushTokenToBackend = async (token) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/users/push-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token,
+          platform: Platform.OS,
+          deviceName: Constants.deviceName || 'Unknown'
+        })
+      });
+
+      if (response.ok) {
+        console.log('Push token saved to backend');
+      }
+    } catch (error) {
+      console.error('Failed to save push token:', error);
+    }
+  };
+
+  const loadUserPreferences = async () => {
+    try {
+      const savedMode = await AsyncStorage.getItem('preferredMode');
+      if (savedMode) {
+        console.log('User preferred mode:', savedMode);
+      }
+    } catch (error) {
+      console.log('No saved preferences');
+    }
+  };
+
+  const handleNotificationClick = (notification) => {
+    const data = notification.request.content.data;
+    if (data?.bookingId) {
+      Alert.alert('予約詳細', `予約ID: ${data.bookingId}`);
+    }
+  };
+
+  const handleModeSelect = async (selectedMode) => {
     console.log('Mode selected:', selectedMode);
     setMode(selectedMode);
+    await AsyncStorage.setItem('preferredMode', selectedMode);
   };
 
   const handleModeChange = (newMode) => {
@@ -77,6 +212,7 @@ export default function App() {
       <CustomerScreen
         onModeChange={handleModeChange}
         onBack={handleBackToSelection}
+        pushToken={pushToken}
       />
     );
   }
@@ -86,11 +222,11 @@ export default function App() {
       <DriverScreen
         onModeChange={handleModeChange}
         onBack={handleBackToSelection}
+        pushToken={pushToken}
       />
     );
   }
 
-  // Main selection screen
   return (
     <SafeAreaView style={styles.container}>
       <View style={[styles.mainContainer, isTablet && styles.mainContainerTablet]}>
@@ -98,7 +234,7 @@ export default function App() {
           <Text style={[styles.logo, isTablet && styles.logoTablet]}>🚕</Text>
           <Text style={[styles.title, isTablet && styles.titleTablet]}>全国AIタクシー</Text>
           <Text style={[styles.subtitle, isTablet && styles.subtitleTablet]}>
-            全国8,600駅対応・天気予報連動配車
+            全国8,604駅対応・天気予報連動配車
           </Text>
         </View>
 
@@ -114,12 +250,12 @@ export default function App() {
               <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>GOより¥1,380お得</Text>
             </View>
             <View style={styles.featureItem}>
-              <Text style={styles.featureEmoji}>🚉</Text>
-              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>全国8,600駅対応</Text>
+              <Text style={styles.featureEmoji}>🔔</Text>
+              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>リアルタイム通知</Text>
             </View>
             <View style={styles.featureItem}>
-              <Text style={styles.featureEmoji}>📈</Text>
-              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>収益85%保証</Text>
+              <Text style={styles.featureEmoji}>📍</Text>
+              <Text style={[styles.featureText, isTablet && styles.featureTextTablet]}>全国8,604駅対応</Text>
             </View>
           </View>
         </View>
@@ -130,8 +266,10 @@ export default function App() {
             onPress={() => handleModeSelect('customer')}
           >
             <Text style={[styles.buttonIcon, isTablet && styles.buttonIconTablet]}>👤</Text>
-            <Text style={[styles.buttonTitle, isTablet && styles.buttonTitleTablet]}>お客様として利用</Text>
-            <Text style={[styles.buttonSubtitle, isTablet && styles.buttonSubtitleTablet]}>配車をリクエスト</Text>
+            <View style={styles.buttonTextContainer}>
+              <Text style={[styles.buttonTitle, isTablet && styles.buttonTitleTablet]}>お客様として利用</Text>
+              <Text style={[styles.buttonSubtitle, isTablet && styles.buttonSubtitleTablet]}>配車をリクエスト</Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -139,23 +277,30 @@ export default function App() {
             onPress={() => handleModeSelect('driver')}
           >
             <Text style={[styles.buttonIcon, isTablet && styles.buttonIconTablet]}>🚗</Text>
-            <Text style={[styles.buttonTitle, isTablet && styles.buttonTitleTablet]}>ドライバーとして利用</Text>
-            <Text style={[styles.buttonSubtitle, isTablet && styles.buttonSubtitleTablet]}>収益を最大化</Text>
+            <View style={styles.buttonTextContainer}>
+              <Text style={[styles.buttonTitle, isTablet && styles.buttonTitleTablet]}>ドライバーとして利用</Text>
+              <Text style={[styles.buttonSubtitle, isTablet && styles.buttonSubtitleTablet]}>収益を最大化</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
         <View style={styles.statusBar}>
-          <Text style={[styles.statusText, isTablet && styles.statusTextTablet]}>
-            位置情報: {locationPermission ? '✅ 許可済み' : '❌ 未許可'}
-          </Text>
+          <View style={styles.statusRow}>
+            <Text style={[styles.statusText, isTablet && styles.statusTextTablet]}>
+              📍 位置: {locationPermission ? '✅ 許可済み' : '❌ 未許可'}
+            </Text>
+            <Text style={[styles.statusText, isTablet && styles.statusTextTablet]}>
+              🔔 通知: {notificationPermission ? '✅ 許可済み' : '❌ 未許可'}
+            </Text>
+          </View>
           <Text style={[styles.versionText, isTablet && styles.versionTextTablet]}>
-            Version 3.1.0 (Build 120)
+            Version 4.0.0 (Build 131)
           </Text>
         </View>
       </View>
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -293,6 +438,9 @@ const styles = StyleSheet.create({
     fontSize: 40,
     marginRight: 20,
   },
+  buttonTextContainer: {
+    flex: 1,
+  },
   buttonTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -314,10 +462,14 @@ const styles = StyleSheet.create({
     bottom: 20,
     alignItems: 'center',
   },
+  statusRow: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 5,
+  },
   statusText: {
     fontSize: 12,
     color: '#666',
-    marginBottom: 5,
   },
   statusTextTablet: {
     fontSize: 14,

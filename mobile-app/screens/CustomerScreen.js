@@ -12,27 +12,28 @@ import {
   ActivityIndicator,
   FlatList,
   Dimensions,
-  SafeAreaView
+  SafeAreaView,
+  KeyboardAvoidingView
 } from 'react-native';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import allStationsData from '../data/all_japan_stations.json';
+import TrainService from '../services/TrainService';
 
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
 const WEATHER_API_KEY = 'bd17578f85cb46d681ca3e4f3bdc9963';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const STATION_DATA = allStationsData;
 
-export default function CustomerScreen({ onModeChange, onBack }) {
-  // Keep all your existing state variables
+export default function CustomerScreen({ onModeChange, onBack, pushToken }) {
   const [isIPad] = useState(Platform.isPad);
   const [location, setLocation] = useState(null);
   const [pickupStation, setPickupStation] = useState(null);
   const [homeAddress, setHomeAddress] = useState(null);
   const [showStationModal, setShowStationModal] = useState(false);
   const [showAddressModal, setShowAddressModal] = useState(false);
-  const [autoBookingEnabled, setAutoBookingEnabled] = useState(false);
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [bookingStatus, setBookingStatus] = useState('idle');
@@ -49,7 +50,14 @@ export default function CustomerScreen({ onModeChange, onBack }) {
   const [stationWeather, setStationWeather] = useState(null);
   const [loadingWeather, setLoadingWeather] = useState(false);
 
-  // Keep all your existing useEffect hooks and functions exactly as they are
+  // Train integration states
+  const [trainDelays, setTrainDelays] = useState(null);
+  const [nextTrains, setNextTrains] = useState([]);
+  const [delaySubscription, setDelaySubscription] = useState(null);
+  const [autoBookingTriggered, setAutoBookingTriggered] = useState(false);
+  const [autoBookingEnabled, setAutoBookingEnabled] = useState(true);
+  const [checkingTrains, setCheckingTrains] = useState(false);
+
   useEffect(() => {
     checkBackendConnection();
     initializeLocation();
@@ -66,14 +74,23 @@ export default function CustomerScreen({ onModeChange, onBack }) {
   useEffect(() => {
     if (pickupStation) {
       checkStationWeather(pickupStation);
+      checkTrainDelays(pickupStation);
+      loadNextTrains(pickupStation);
+      subscribeToDelayUpdates(pickupStation);
     }
+
+    return () => {
+      if (delaySubscription) {
+        TrainService.unsubscribeFromDelays(delaySubscription);
+      }
+    };
   }, [pickupStation]);
 
   useEffect(() => {
     if (pickupStation && homeAddress) {
       calculateFare();
     }
-  }, [pickupStation, homeAddress]);
+  }, [pickupStation, homeAddress, surgePricing]);
 
   const checkBackendConnection = async () => {
     try {
@@ -135,6 +152,90 @@ export default function CustomerScreen({ onModeChange, onBack }) {
     }
   };
 
+  // Train delay checking functions
+  const checkTrainDelays = async (station) => {
+    setCheckingTrains(true);
+    try {
+      const lines = await TrainService.getStationLines(station.name);
+      const delayStatus = await TrainService.checkDelays(station.name, lines.map(l => l.id));
+
+      setTrainDelays(delayStatus);
+
+      // Auto-booking logic for severe delays
+      if (delayStatus.hasDelays && delayStatus.maxDelay >= 30 && !autoBookingTriggered && autoBookingEnabled) {
+        handleAutoBooking(delayStatus);
+      }
+    } catch (error) {
+      console.error('Error checking train delays:', error);
+    } finally {
+      setCheckingTrains(false);
+    }
+  };
+
+  const loadNextTrains = async (station) => {
+    try {
+      const trains = await TrainService.getNextTrains(station.name);
+      setNextTrains(trains);
+    } catch (error) {
+      console.error('Error loading next trains:', error);
+    }
+  };
+
+  const subscribeToDelayUpdates = async (station) => {
+    const subscriptionId = await TrainService.subscribeToDelays(
+      station.name,
+      (delayStatus) => {
+        setTrainDelays(delayStatus);
+
+        if (delayStatus.maxDelay >= 20 && autoBookingEnabled) {
+          Alert.alert(
+            '⚠️ 電車遅延検知',
+            `${station.name}で${delayStatus.maxDelay}分の遅延が発生しています。タクシーをご利用しますか？`,
+            [
+              { text: 'キャンセル', style: 'cancel' },
+              { text: 'タクシーを予約', onPress: () => handleAutoBooking(delayStatus) }
+            ]
+          );
+        }
+      }
+    );
+
+    setDelaySubscription(subscriptionId);
+  };
+
+  const handleAutoBooking = async (delayStatus) => {
+    setAutoBookingTriggered(true);
+
+    // Auto-fill destination if saved addresses exist
+    if (savedAddresses.length > 0 && !homeAddress) {
+      setHomeAddress(savedAddresses[0]);
+    }
+
+    // Increase surge pricing for delays
+    if (delayStatus.maxDelay >= 30) {
+      setSurgePricing(1.3);
+    }
+
+    Alert.alert(
+      '🚕 自動配車提案',
+      `${delayStatus.maxDelay}分の遅延を検知しました。\nタクシーを自動手配しますか？`,
+      [
+        { text: '後で', style: 'cancel' },
+        {
+          text: '今すぐ予約',
+          onPress: () => {
+            if (pickupStation && homeAddress) {
+              requestRide();
+            } else {
+              Alert.alert('情報不足', '目的地を入力してください');
+              setShowAddressModal(true);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const checkStationWeather = async (station) => {
     setLoadingWeather(true);
     try {
@@ -176,23 +277,12 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         if (weatherInfo.rainProbability > 80) {
           setSurgePricing(1.30);
         }
-
-        Alert.alert(
-          '☔ 雨の予報',
-          `${station.name}周辺で${weatherInfo.rainTime}頃に雨（${weatherInfo.rainProbability}%）\nタクシーのご利用をお勧めします`,
-          [{ text: 'OK' }]
-        );
-      } else {
+      } else if (!trainDelays?.hasDelays) {
         setSurgePricing(1.0);
       }
 
     } catch (error) {
       console.error('Weather check failed:', error);
-      setStationWeather({
-        current: '天気情報取得エラー',
-        temp: '--',
-        willRain: false
-      });
     } finally {
       setLoadingWeather(false);
     }
@@ -273,78 +363,79 @@ export default function CustomerScreen({ onModeChange, onBack }) {
   const calculateFare = () => {
     if (!pickupStation || !homeAddress) return;
 
-    const baseFare = 730;
-    let estimatedDistance = 10;
+    const baseFare = 500; // Tokyo taxi initial fare
+    let estimatedDistance = 5; // Default 5km
 
-    if (location && pickupStation.lat && pickupStation.lng) {
-      const R = 6371;
-      const dLat = (location.latitude - pickupStation.lat) * Math.PI / 180;
-      const dLng = (location.longitude - pickupStation.lng) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(pickupStation.lat * Math.PI / 180) *
-                Math.cos(location.latitude * Math.PI / 180) *
-                Math.sin(dLng/2) * Math.sin(dLng/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      estimatedDistance = R * c * 1.3;
-    } else {
+    // Special handling for known destinations
+    const addressStr = homeAddress.address || homeAddress.name || '';
+
+    // Airport destinations - fixed high distances
+    if (addressStr.includes('羽田空港') || addressStr.includes('成田空港')) {
+      if (addressStr.includes('羽田')) {
+        // Distance from central Tokyo to Haneda
+        estimatedDistance = 20 + Math.random() * 5; // 20-25km
+      } else if (addressStr.includes('成田')) {
+        // Distance from central Tokyo to Narita
+        estimatedDistance = 60 + Math.random() * 10; // 60-70km
+      }
+    }
+    // Station to station estimates
+    else if (pickupStation && addressStr) {
+      // Check prefecture difference
       if (pickupStation.prefecture === '東京都') {
-        estimatedDistance = 8;
-      } else if (pickupStation.prefecture === '大阪府') {
-        estimatedDistance = 12;
-      } else if (pickupStation.prefecture === '北海道') {
-        estimatedDistance = 15;
+        if (addressStr.includes('神奈川') || addressStr.includes('横浜')) {
+          estimatedDistance = 30 + Math.random() * 10; // 30-40km
+        } else if (addressStr.includes('千葉') || addressStr.includes('埼玉')) {
+          estimatedDistance = 25 + Math.random() * 10; // 25-35km
+        } else if (addressStr.includes('区')) {
+          // Within Tokyo wards
+          const sameWard = addressStr.includes('文京区') && pickupStation.name.includes('本郷');
+          estimatedDistance = sameWard ?
+            (1 + Math.random() * 2) : // 1-3km same ward
+            (3 + Math.random() * 7);  // 3-10km different ward
+        } else {
+          // Default Tokyo distance
+          estimatedDistance = 5 + Math.random() * 5; // 5-10km
+        }
       } else {
-        estimatedDistance = 10;
+        // Outside Tokyo
+        estimatedDistance = 15 + Math.random() * 15; // 15-30km
       }
     }
 
-    estimatedDistance = estimatedDistance * (1 + (Math.random() - 0.5) * 0.4);
+    // Tokyo taxi fare calculation
+    let totalFare = baseFare;
 
-    let distanceFare = 0;
     if (estimatedDistance > 1.096) {
       const additionalDistance = estimatedDistance - 1.096;
-      distanceFare = Math.floor(additionalDistance / 0.255) * 90;
+      const additionalUnits = Math.ceil(additionalDistance / 0.255);
+      totalFare += additionalUnits * 100;
     }
 
-    const estimatedMinutes = (estimatedDistance / 25) * 60;
-    const timeFare = Math.floor(estimatedMinutes * 40);
+    // Time-based fare (traffic)
+    const estimatedMinutes = estimatedDistance * 3; // 3 min per km average
+    const timeFare = Math.floor(estimatedMinutes / 1.5) * 40;
+    totalFare += timeFare;
 
-    let totalFare = baseFare + distanceFare + timeFare;
-
-    if (estimatedDistance > 15) {
-      totalFare += 500;
+    // Late night surcharge
+    const currentHour = new Date().getHours();
+    if (currentHour >= 22 || currentHour < 5) {
+      totalFare *= 1.2;
     }
 
+    // Apply surge pricing
     if (surgePricing > 1.0) {
       totalFare = Math.floor(totalFare * surgePricing);
     }
 
+    // Round to nearest 10 yen
     totalFare = Math.round(totalFare / 10) * 10;
+
+    // Minimum fare
+    totalFare = Math.max(totalFare, 500);
 
     setFare(totalFare);
     setEstimatedTime(Math.floor(estimatedMinutes));
-  };
-
-  const validateAddress = (address) => {
-    if (!address || address.trim().length < 3) {
-      return { isValid: false, error: '住所が短すぎます（3文字以上）' };
-    }
-
-    const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(address);
-    const hasNumbers = /\d/.test(address);
-
-    if (!hasJapanese && !hasNumbers) {
-      return { isValid: false, error: '有効な住所を入力してください' };
-    }
-
-    const commonPatterns = ['都', '県', '市', '区', '町', '丁目', '番', '号'];
-    const hasAddressPattern = commonPatterns.some(pattern => address.includes(pattern));
-
-    if (!hasAddressPattern && address.length < 10) {
-      return { isValid: false, error: '完全な住所を入力してください（例：渋谷区道玄坂1-2-3）' };
-    }
-
-    return { isValid: true };
   };
 
   const requestRide = async () => {
@@ -357,10 +448,14 @@ export default function CustomerScreen({ onModeChange, onBack }) {
 
     setTimeout(() => {
       setBookingStatus('confirmed');
-      setSelectedDriver(nearbyDrivers[0]);
       const mockConfirmation = 'ZK' + Math.random().toString(36).substr(2, 9).toUpperCase();
       setConfirmationNumber(mockConfirmation);
-      Alert.alert('予約確定', `確認番号: ${mockConfirmation}`);
+      setSelectedDriver(nearbyDrivers[0]);
+
+      Alert.alert(
+        '予約確定',
+        `確認番号: ${mockConfirmation}\n${nearbyDrivers[0].name}が${nearbyDrivers[0].eta}分で到着します`
+      );
     }, 1500);
   };
 
@@ -378,13 +473,13 @@ export default function CustomerScreen({ onModeChange, onBack }) {
             setFare(null);
             setEstimatedTime(null);
             setConfirmationNumber('');
+            setAutoBookingTriggered(false);
           }
         }
       ]
     );
   };
 
-  // Simple map visualization without any external dependencies
   const renderMapView = () => (
     <View style={styles.mapContainer}>
       <View style={styles.mapContent}>
@@ -416,12 +511,6 @@ export default function CustomerScreen({ onModeChange, onBack }) {
             </View>
           ))}
         </View>
-
-        {!pickupStation && (
-          <Text style={styles.mapHint}>
-            駅を選択すると、利用可能なドライバーが表示されます
-          </Text>
-        )}
       </View>
 
       {stationWeather && (
@@ -432,168 +521,81 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         </View>
       )}
 
-      <View style={styles.mapOverlay}>
-        <Text style={styles.mapOverlayText}>
-          {nearbyDrivers.length}台の利用可能なドライバー
-        </Text>
-      </View>
+      {trainDelays?.hasDelays && (
+        <View style={styles.delayBadge}>
+          <Text style={styles.delayBadgeText}>
+            ⚠️ {trainDelays.maxDelay}分遅延
+          </Text>
+        </View>
+      )}
     </View>
   );
 
-  const AddressInputModal = () => {
-    const [localAddress, setLocalAddress] = useState('');
-    const [addressError, setAddressError] = useState('');
-
-    if (!showAddressModal) return null;
-
-    const handleAddressSubmit = () => {
-      const validation = validateAddress(localAddress);
-
-      if (!validation.isValid) {
-        setAddressError(validation.error);
-        Alert.alert('入力エラー', validation.error);
-        return;
-      }
-
-      const newAddress = {
-        address: localAddress.trim(),
-        name: localAddress.trim()
-      };
-      setHomeAddress(newAddress);
-      saveAddress(localAddress.trim());
-
-      if (pickupStation) {
-        calculateFare();
-      }
-
-      setShowAddressModal(false);
-      setLocalAddress('');
-      setAddressError('');
-      setCustomAddress('');
-    };
+  const renderTrainStatus = () => {
+    if (!pickupStation) return null;
 
     return (
-      <Modal
-        visible={true}
-        animationType="slide"
-        transparent={false}
-        presentationStyle="formSheet"
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-          <View style={{ padding: 20 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>目的地を入力</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowAddressModal(false);
-                  setLocalAddress('');
-                  setCustomAddress('');
-                  setAddressError('');
-                }}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={{
-                borderWidth: 1,
-                borderColor: addressError ? '#ff6b6b' : '#FFD700',
-                borderRadius: 10,
-                padding: 15,
-                fontSize: 16,
-                marginBottom: 5,
-              }}
-              placeholder="住所を入力してください（例：渋谷区道玄坂1-2-3）"
-              value={localAddress}
-              onChangeText={(text) => {
-                setLocalAddress(text);
-                setAddressError('');
-              }}
-              autoFocus={false}
+      <View style={styles.trainStatusCard}>
+        <View style={styles.trainStatusHeader}>
+          {checkingTrains ? (
+            <ActivityIndicator size="small" color="#FFD700" />
+          ) : (
+            <Ionicons
+              name={trainDelays?.hasDelays ? "warning" : "checkmark-circle"}
+              size={24}
+              color={trainDelays?.hasDelays ? "#FF6347" : "#4CAF50"}
             />
+          )}
+          <Text style={styles.trainStatusTitle}>
+            {checkingTrains ? '確認中...' :
+             trainDelays?.hasDelays ? '遅延情報' : '正常運行'}
+          </Text>
+          <TouchableOpacity
+            onPress={() => checkTrainDelays(pickupStation)}
+            style={styles.refreshButton}
+          >
+            <Ionicons name="refresh" size={20} color="#666" />
+          </TouchableOpacity>
+        </View>
 
-            {addressError ? (
-              <Text style={{ color: '#ff6b6b', fontSize: 12, marginBottom: 10 }}>
-                {addressError}
-              </Text>
-            ) : null}
+        {trainDelays?.hasDelays && (
+          <View style={styles.delayDetails}>
+            {trainDelays.delays.map((delay, index) => (
+              <View key={index} style={styles.delayItem}>
+                <Text style={styles.delayLine}>{delay.lineName}</Text>
+                <Text style={styles.delayTime}>{delay.delayMinutes}分遅延</Text>
+                {delay.description && !delay.description.includes('odpt') && (
+                  <Text style={styles.delayReason}>{delay.description}</Text>
+                )}
+              </View>
+            ))}
 
-            <TouchableOpacity
-              style={{
-                backgroundColor: localAddress.trim() ? '#FFD700' : '#ccc',
-                padding: 15,
-                borderRadius: 10,
-                alignItems: 'center',
-                marginBottom: 20,
-              }}
-              onPress={handleAddressSubmit}
-              disabled={!localAddress.trim()}
-            >
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333' }}>
-                この住所を使用
-              </Text>
-            </TouchableOpacity>
-
-            <View style={{ marginBottom: 20 }}>
-              <Text style={{ fontSize: 14, color: '#666', marginBottom: 10 }}>
-                サンプル住所:
-              </Text>
-              <TouchableOpacity
-                onPress={() => setLocalAddress('東京都渋谷区道玄坂1-2-3')}
-                style={{ padding: 10, backgroundColor: '#f0f0f0', marginBottom: 5, borderRadius: 5 }}
-              >
-                <Text>東京都渋谷区道玄坂1-2-3</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setLocalAddress('港区六本木6-10-1')}
-                style={{ padding: 10, backgroundColor: '#f0f0f0', marginBottom: 5, borderRadius: 5 }}
-              >
-                <Text>港区六本木6-10-1</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 400 }}>
-              {savedAddresses.length > 0 && (
-                <View>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10 }}>
-                    保存された住所
-                  </Text>
-                  {savedAddresses.map((addr, index) => (
-                    <TouchableOpacity
-                      key={addr.id || index}
-                      style={{
-                        padding: 15,
-                        backgroundColor: '#f8f8f8',
-                        borderRadius: 10,
-                        marginBottom: 10,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                      }}
-                      onPress={() => {
-                        setHomeAddress(addr);
-                        saveAddress(addr.address);
-                        if (pickupStation) {
-                          calculateFare();
-                        }
-                        setShowAddressModal(false);
-                        setLocalAddress('');
-                        setCustomAddress('');
-                        setAddressError('');
-                      }}
-                    >
-                      <Ionicons name="location" size={20} color="#666" />
-                      <Text style={{ marginLeft: 10, flex: 1 }}>
-                        {addr.name || addr.address}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
+            {trainDelays.recommendation && (
+              <View style={[
+                styles.recommendationBox,
+                trainDelays.recommendation.type === 'urgent' && styles.urgentBox
+              ]}>
+                <Text style={styles.recommendationText}>
+                  {trainDelays.recommendation.message}
+                </Text>
+              </View>
+            )}
           </View>
-        </SafeAreaView>
-      </Modal>
+        )}
+
+        {nextTrains.length > 0 && (
+          <View style={styles.nextTrainsSection}>
+            <Text style={styles.nextTrainsTitle}>次の電車</Text>
+            {nextTrains.slice(0, 3).map((train, index) => (
+              <View key={index} style={styles.nextTrainItem}>
+                <Text style={styles.trainTime}>{train.departureTime}</Text>
+                <Text style={styles.trainDestination}>{train.destination}行き</Text>
+                <Text style={styles.trainType}>{train.trainType}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -618,7 +620,6 @@ export default function CustomerScreen({ onModeChange, onBack }) {
       <ScrollView style={styles.content}>
         {renderMapView()}
 
-        {/* Rest of your content remains exactly the same */}
         <View style={styles.mainCard}>
           <Text style={styles.sectionTitle}>配車リクエスト</Text>
 
@@ -642,12 +643,11 @@ export default function CustomerScreen({ onModeChange, onBack }) {
             </View>
           </TouchableOpacity>
 
+          {renderTrainStatus()}
+
           <TouchableOpacity
             style={styles.inputButton}
-            onPress={() => {
-              setShowAddressModal(true);
-              setCustomAddress('');
-            }}
+            onPress={() => setShowAddressModal(true)}
           >
             <Ionicons name="location" size={24} color="#FF6347" />
             <Text style={styles.inputButtonText}>
@@ -684,7 +684,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
               <Text style={styles.fareAmount}>¥{fare.toLocaleString()}</Text>
               {surgePricing > 1.0 && (
                 <Text style={styles.surgeText}>
-                  ※ 雨天のため{Math.floor((surgePricing - 1) * 100)}%増
+                  ※ {trainDelays?.hasDelays ? '遅延' : '雨天'}のため{Math.floor((surgePricing - 1) * 100)}%増
                 </Text>
               )}
               <Text style={styles.savingsText}>
@@ -695,13 +695,6 @@ export default function CustomerScreen({ onModeChange, onBack }) {
                   予想時間: 約{estimatedTime}分
                 </Text>
               )}
-            </View>
-          )}
-
-          {nearbyDrivers.length > 0 && (
-            <View style={styles.driversContainer}>
-              <Text style={styles.driversTitle}>利用可能なドライバー</Text>
-              <Text style={styles.driversCount}>{nearbyDrivers.length}台</Text>
             </View>
           )}
 
@@ -733,7 +726,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         <View style={styles.trainCard}>
           <View style={styles.trainCardHeader}>
             <Ionicons name="train" size={24} color="#FFD700" />
-            <Text style={styles.trainCardTitle}>天気予報連携</Text>
+            <Text style={styles.trainCardTitle}>電車遅延自動検知</Text>
             <TouchableOpacity
               style={[styles.syncToggle, autoBookingEnabled && styles.syncToggleActive]}
               onPress={() => setAutoBookingEnabled(!autoBookingEnabled)}
@@ -744,7 +737,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
             </TouchableOpacity>
           </View>
           <Text style={styles.trainCardDescription}>
-            駅到着時の天気を予測して、雨の場合は自動的にタクシーを提案します
+            30分以上の遅延を検知すると自動的にタクシーを提案します
           </Text>
         </View>
 
@@ -757,14 +750,14 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Station Selection Modal - keep exactly as is */}
+      {/* Station Selection Modal */}
       <Modal
         visible={showStationModal}
         animationType="slide"
         transparent={true}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>駅を選択（全国対応）</Text>
               <TouchableOpacity
@@ -805,7 +798,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
                     setPickupStation(item);
                     setShowStationModal(false);
                     setStationSearchQuery('');
-                    if (homeAddress) calculateFare();
+                    setAutoBookingTriggered(false);
                   }}
                 >
                   <View style={{ flex: 1 }}>
@@ -826,14 +819,117 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         </View>
       </Modal>
 
-      <AddressInputModal />
+      {/* Address Input Modal */}
+      <Modal
+        visible={showAddressModal}
+        animationType="slide"
+        transparent={false}
+        presentationStyle="formSheet"
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+          <View style={{ padding: 20 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>目的地を入力</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowAddressModal(false);
+                  setCustomAddress('');
+                }}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={{
+                borderWidth: 1,
+                borderColor: '#FFD700',
+                borderRadius: 10,
+                padding: 15,
+                fontSize: 16,
+                marginBottom: 15,
+              }}
+              placeholder="住所を入力してください（例：渋谷区道玄坂1-2-3）"
+              value={customAddress}
+              onChangeText={setCustomAddress}
+              autoFocus={false}
+            />
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: customAddress.trim() ? '#FFD700' : '#ccc',
+                padding: 15,
+                borderRadius: 10,
+                alignItems: 'center',
+                marginBottom: 20,
+              }}
+              onPress={() => {
+                if (customAddress.trim()) {
+                  const newAddress = {
+                    address: customAddress.trim(),
+                    name: customAddress.trim()
+                  };
+                  setHomeAddress(newAddress);
+                  saveAddress(customAddress.trim());
+                  setShowAddressModal(false);
+                  setCustomAddress('');
+                }
+              }}
+              disabled={!customAddress.trim()}
+            >
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333' }}>
+                この住所を使用
+              </Text>
+            </TouchableOpacity>
+
+            <ScrollView style={{ maxHeight: 400 }}>
+              {savedAddresses.length > 0 && (
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 10 }}>
+                    よく使う目的地
+                  </Text>
+                  {savedAddresses.map((addr, index) => (
+                    <TouchableOpacity
+                      key={addr.id || index}
+                      style={{
+                        padding: 15,
+                        backgroundColor: '#f8f8f8',
+                        borderRadius: 10,
+                        marginBottom: 10,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                      }}
+                      onPress={() => {
+                        setHomeAddress(addr);
+                        saveAddress(addr.address);
+                        setShowAddressModal(false);
+                        setCustomAddress('');
+                      }}
+                    >
+                      <Ionicons
+                        name={index < 3 ? "star" : "location"}
+                        size={20}
+                        color={index < 3 ? "#FFD700" : "#666"}
+                      />
+                      <Text style={{ marginLeft: 10, flex: 1 }}>
+                        {addr.name || addr.address}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#999' }}>
+                        {addr.useCount}回
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
 
-// Keep all your existing styles and add these new ones
 const styles = StyleSheet.create({
-  // All your existing styles remain the same
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -879,7 +975,6 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 15,
   },
-  // New map styles without external dependencies
   mapContainer: {
     height: 250,
     backgroundColor: '#e8f4f8',
@@ -941,26 +1036,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
-  mapHint: {
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 14,
-    marginTop: 20,
-  },
-  mapOverlay: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  mapOverlayText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#333',
-  },
   weatherBadge: {
     position: 'absolute',
     top: 10,
@@ -974,7 +1049,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
-  // Keep all your other existing styles
+  delayBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(255, 99, 71, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+  delayBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white',
+  },
   mainCard: {
     backgroundColor: 'white',
     borderRadius: 15,
@@ -1010,6 +1098,103 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 2,
+  },
+  trainStatusCard: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 15,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  trainStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  trainStatusTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    flex: 1,
+    color: '#333',
+  },
+  refreshButton: {
+    padding: 5,
+  },
+  delayDetails: {
+    marginTop: 10,
+  },
+  delayItem: {
+    backgroundColor: '#fff5f5',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  delayLine: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FF6347',
+  },
+  delayTime: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 2,
+  },
+  delayReason: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  recommendationBox: {
+    backgroundColor: '#FFF8DC',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  urgentBox: {
+    backgroundColor: '#FFE4E1',
+    borderWidth: 1,
+    borderColor: '#FF6347',
+  },
+  recommendationText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  nextTrainsSection: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  nextTrainsTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#666',
+    marginBottom: 8,
+  },
+  nextTrainItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  trainTime: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    width: 50,
+  },
+  trainDestination: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  trainType: {
+    fontSize: 12,
+    color: '#999',
   },
   weatherCard: {
     flexDirection: 'row',
@@ -1071,24 +1256,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 5,
-  },
-  driversContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 15,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-  },
-  driversTitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  driversCount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFD700',
   },
   requestButton: {
     backgroundColor: '#FFD700',
@@ -1173,20 +1340,19 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalContent: {
     backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 20,
-    maxHeight: '80%',
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
     marginBottom: 15,
   },
   modalTitle: {

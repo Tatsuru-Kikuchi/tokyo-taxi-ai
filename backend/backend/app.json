@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "e8f5aeb6-2ea5-471a-94a9-fd89cef6d251"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.tatsurukikuchi.zenkokuaitaxibackend",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}
