@@ -1,0 +1,39 @@
+<svg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone App Icon 60x60 (20pt @3x for Notifications) -->
+  <defs>
+    <linearGradient id="bgGradient60" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow60" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.5"/>
+      <feOffset dx="0" dy="0.5" result="offsetblur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3"/>
+      <feComposite in2="offsetblur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <rect width="60" height="60" fill="url(#bgGradient60)"/>
+  
+  <!-- AI Badge -->
+  <g transform="rotate(-15 41 12)">
+    <rect x="36" y="8" width="10" height="7" rx="3" fill="#FFD700" filter="url(#shadow60)"/>
+    <text x="41" y="13" font-family="Arial Black, sans-serif" font-size="4.5" font-weight="900" text-anchor="middle" fill="#333">AI</text>
+  </g>
+  
+  <!-- Simplified Taxi -->
+  <g transform="translate(30, 23)">
+    <rect x="-9" y="-3.5" width="18" height="7" rx="1.5" fill="#FDB813" filter="url(#shadow60)"/>
+    <rect x="-3.5" y="-6" width="7" height="2.5" rx="0.5" fill="#333" filter="url(#shadow60)"/>
+    <circle cx="-5.5" cy="3.5" r="2" fill="#333"/>
+    <circle cx="5.5" cy="3.5" r="2" fill="#333"/>
+  </g>
+  
+  <text x="30" y="38" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="6" font-weight="900" text-anchor="middle" fill="white">全国AI</text>
+  <text x="30" y="45" font-family="Hiragino Sans, Arial Black, sans-serif" font-size="6" font-weight="900" text-anchor="middle" fill="white">タクシー</text>
+  <text x="30" y="50.5" font-family="Hiragino Sans, Arial, sans-serif" font-size="3" font-weight="600" text-anchor="middle" fill="rgba(255,255,255,0.9)">次世代配車</text>
+</svg>

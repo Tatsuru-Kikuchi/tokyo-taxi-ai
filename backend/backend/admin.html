@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国AIタクシー Admin Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        .stat-box {
+            text-align: center;
+            padding: 20px;
+            background: #FFD700;
+            border-radius: 8px;
+        }
+        .stat-number {
+            font-size: 36px;
+            font-weight: bold;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚕 全国AIタクシー Admin Dashboard</h1>
+    
+    <div class="card">
+        <h2>Today's Stats</h2>
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-number" id="bookingCount">0</div>
+                <div class="stat-label">Bookings</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number" id="driverCount">0</div>
+                <div class="stat-label">Active Drivers</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">¥<span id="revenue">0</span></div>
+                <div class="stat-label">Revenue</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Recent Bookings</h2>
+        <div id="bookingsList">Loading...</div>
+    </div>
+
+    <script>
+        // Fetch stats from backend
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/admin/stats');
+                const data = await response.json();
+                
+                document.getElementById('bookingCount').innerText = data.bookingCount || 0;
+                document.getElementById('driverCount').innerText = data.driverCount || 0;
+                document.getElementById('revenue').innerText = (data.revenue || 0).toLocaleString();
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            }
+        }
+
+        // Update every 30 seconds
+        updateStats();
+        setInterval(updateStats, 30000);
+    </script>
+</body>
+</html>

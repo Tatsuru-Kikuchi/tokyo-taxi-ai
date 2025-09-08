@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "19439293286",
+    "project_id": "tokyo-taxi-ai",
+    "storage_bucket": "tokyo-taxi-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:19439293286:android:59b6f75dda83096398eea7",
+        "android_client_info": {
+          "package_name": "com.zenkoku.aitaxi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDc4ivi9zz6b1qKCqEWKZhpPz6uyS61oN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

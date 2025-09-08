@@ -2,7 +2,7 @@
   "expo": {
     "name": "全国AIタクシー",
     "slug": "tokyo-taxi-ai",
-    "version": "3.0.1",
+    "version": "4.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,13 +10,14 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#667eea"
+      "backgroundColor": "#FFD700"
     },
     "ios": {
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "129",
+      "buildNumber": "131",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
         "NSLocationAlwaysUsageDescription": "バックグラウンドでも配車状況を更新します",
@@ -45,29 +46,23 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#667eea"
+        "backgroundColor": "#FFD700"
       },
       "package": "com.zenkoku.aitaxi",
-      "versionCode": 108,
+      "versionCode": 131,
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION"
       ]
     },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "配車サービスの品質向上のため、位置情報を使用します。"
-        }
-      ],
-      "expo-maps"
-    ],
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#FFD700"
+    },
     "extra": {
-      "backendUrl": "https://tokyo-taxi-ai-backend-production.up.railway.app",
-      "lineChannelId": "2007928791",
-      "lineOAId": "@dhai52765howdah",
+      "backendUrl": "https://tokyo-taxi-ai-production.up.railway.app",
       "eas": {
         "projectId": "0d3e0ad5-b89e-445b-961c-390962b4a4d6"
       }

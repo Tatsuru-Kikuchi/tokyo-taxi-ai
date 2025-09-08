@@ -1,0 +1,41 @@
+{
+  "_VERSION_INFO": {
+    "build": 86,
+    "status": "WORKING",
+    "notes": "autoIncrement handles build numbers automatically"
+  },
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "local",
+    "promptToConfigurePushNotifications": false
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "production": {
+      "ios": {
+        "autoIncrement": true
+      },
+      "android": {
+        "autoIncrement": true
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "kikuchi@wisteria-software.com",
+        "ascAppId": "6738762599",
+        "appleTeamId": "3W6S4GKHSR"
+      }
+    }
+  }
+}
