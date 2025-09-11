@@ -1,0 +1,68 @@
+<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone Frame -->
+  <rect width="375" height="812" rx="40" ry="40" fill="#000"/>
+  <rect x="15" y="15" width="345" height="782" rx="35" ry="35" fill="#1a1a1a"/>
+  
+  <!-- Status Bar -->
+  <rect x="15" y="15" width="345" height="44" fill="#000"/>
+  <text x="30" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">9:41</text>
+  <text x="320" y="35" font-family="system-ui" font-size="14" fill="white" font-weight="500">100%</text>
+  
+  <!-- Header Bar -->
+  <rect x="15" y="59" width="345" height="60" fill="#333"/>
+  <text x="187.5" y="95" font-family="system-ui" font-size="18" font-weight="bold" text-anchor="middle" fill="white">🚗 ドライバーダッシュボード</text>
+  
+  <!-- Earnings Card -->
+  <rect x="30" y="139" width="315" height="100" rx="15" ry="15" fill="url(#greenGradient)"/>
+  <defs>
+    <linearGradient id="greenGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#43e97b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#38f9d7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <text x="50" y="170" font-family="system-ui" font-size="16" font-weight="bold" fill="white">💰 本日の収益</text>
+  <text x="50" y="200" font-family="system-ui" font-size="32" font-weight="bold" fill="white">¥18,500</text>
+  <text x="50" y="220" font-family="system-ui" font-size="12" fill="rgba(255,255,255,0.8)">前日比 +25% | 完了: 12回</text>
+  
+  <!-- Status Indicator -->
+  <rect x="30" y="259" width="315" height="50" rx="12" ry="12" fill="#34C759"/>
+  <text x="187.5" y="290" font-family="system-ui" font-size="16" font-weight="bold" text-anchor="middle" fill="white">✅ オンライン - 配車待機中</text>
+  
+  <!-- AI Recommendations -->
+  <rect x="30" y="329" width="315" height="120" rx="12" ry="12" fill="#333" stroke="#555" stroke-width="1"/>
+  <text x="50" y="355" font-family="system-ui" font-size="16" font-weight="bold" fill="white">🤖 AI推奨エリア</text>
+  <text x="50" y="380" font-family="system-ui" font-size="14" fill="#ccc">🎯 名古屋駅へ移動推奨</text>
+  <text x="50" y="400" font-family="system-ui" font-size="12" fill="#aaa">🌧️ 雨予報のため需要増加予想</text>
+  <text x="50" y="420" font-family="system-ui" font-size="12" fill="#aaa">💰 予想収益: +¥1,200/時間</text>
+  
+  <!-- Current Stats -->
+  <rect x="30" y="469" width="150" height="80" rx="12" ry="12" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+  <text x="105" y="495" font-family="system-ui" font-size="14" font-weight="bold" text-anchor="middle" fill="white">📊 今日の統計</text>
+  <text x="105" y="515" font-family="system-ui" font-size="12" text-anchor="middle" fill="#ccc">走行距離: 180km</text>
+  <text x="105" y="535" font-family="system-ui" font-size="12" text-anchor="middle" fill="#ccc">オンライン時間: 8h</text>
+  
+  <rect x="195" y="469" width="150" height="80" rx="12" ry="12" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+  <text x="270" y="495" font-family="system-ui" font-size="14" font-weight="bold" text-anchor="middle" fill="white">⭐ 評価</text>
+  <text x="270" y="515" font-family="system-ui" font-size="12" text-anchor="middle" fill="#ccc">平均評価: 4.9</text>
+  <text x="270" y="535" font-family="system-ui" font-size="12" text-anchor="middle" fill="#ccc">完了率: 98%</text>
+  
+  <!-- Weather & Demand Alert -->
+  <rect x="30" y="569" width="315" height="80" rx="12" ry="12" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1"/>
+  <text x="50" y="595" font-family="system-ui" font-size="14" font-weight="bold" fill="white">🌧️ 天気アラート</text>
+  <text x="50" y="615" font-family="system-ui" font-size="12" fill="#93c5fd">30分後に雨予報 - 駅周辺で需要急増予想</text>
+  <text x="50" y="635" font-family="system-ui" font-size="12" fill="#93c5fd">推奨行動: 名古屋駅・栄駅周辺へ事前移動</text>
+  
+  <!-- Action Buttons -->
+  <rect x="30" y="669" width="100" height="40" rx="8" ry="8" fill="#ff6b6b"/>
+  <text x="80" y="694" font-family="system-ui" font-size="12" font-weight="bold" text-anchor="middle" fill="white">オフライン</text>
+  
+  <rect x="140" y="669" width="100" height="40" rx="8" ry="8" fill="#4facfe"/>
+  <text x="190" y="694" font-family="system-ui" font-size="12" text-anchor="middle" fill="white">推奨へ移動</text>
+  
+  <rect x="250" y="669" width="95" height="40" rx="8" ry="8" fill="#333"/>
+  <text x="297.5" y="694" font-family="system-ui" font-size="12" text-anchor="middle" fill="white">設定</text>
+  
+  <!-- Performance Badge -->
+  <rect x="30" y="729" width="315" height="40" fill="rgba(67, 233, 123, 0.1)" rx="8" ry="8"/>
+  <text x="187.5" y="754" font-family="system-ui" font-size="12" font-weight="bold" text-anchor="middle" fill="#43e97b">🏆 今月のトップパフォーマー | AI活用効果: 収益30%向上</text>
+</svg>

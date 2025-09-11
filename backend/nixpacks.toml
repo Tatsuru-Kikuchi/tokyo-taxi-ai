@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = ["npm ci --production"]
+
+[phases.build]
+cmds = ["echo 'Build timestamp: $(date)' && ls -la"]
+
+[phases.start]
+cmd = "node server.js"
+
+[start]
+cmd = "node server.js"

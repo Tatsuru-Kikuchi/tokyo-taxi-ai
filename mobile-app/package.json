@@ -1,0 +1,38 @@
+{
+  "name": "tokyo-taxi-ai",
+  "version": "3.0.1",
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "clean": "git clean -xdf .cache .expo android ios node_modules"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~5.0.4",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "expo": "53.0.22",
+    "expo-constants": "~15.4.0",
+    "expo-firebase-analytics": "^4.1.0",
+    "expo-firebase-core": "^3.1.0",
+    "expo-linking": "~7.1.7",
+    "expo-location": "~18.1.6",
+    "expo-maps": "~0.11.0",
+    "expo-modules-core": "~2.5.0",
+    "expo-notifications": "^0.31.4",
+    "expo-status-bar": "~2.2.3",
+    "hermes": "^0.0.8",
+    "hermes-engine": "^0.11.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-native": "0.79.5",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-web": "^0.20.0",
+    "react-native-webview": "13.13.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}

@@ -1,0 +1,61 @@
+<svg width="2048" height="2732" viewBox="0 0 2048 2732" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="15"/>
+      <feOffset dx="0" dy="15" result="offsetblur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.2"/>
+      <feComposite in2="offsetblur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <rect width="2048" height="2732" fill="url(#bg1)"/>
+  
+  <!-- Logo -->
+  <text x="1024" y="600" font-family="Arial" font-size="280" text-anchor="middle" fill="white">🚕</text>
+  
+  <!-- Title -->
+  <text x="1024" y="850" font-family="Hiragino Sans, Arial Black" font-size="140" font-weight="900" text-anchor="middle" fill="white">全国AIタクシー</text>
+  
+  <!-- Subtitle -->
+  <text x="1024" y="980" font-family="Hiragino Sans, Arial" font-size="72" text-anchor="middle" fill="rgba(255,255,255,0.9)">次世代配車サービス</text>
+  
+  <!-- Customer Button -->
+  <rect x="424" y="1200" width="1200" height="280" rx="60" fill="white" filter="url(#shadow)"/>
+  <text x="550" y="1360" font-family="Arial" font-size="120">👤</text>
+  <text x="700" y="1320" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" fill="#333">お客様として利用</text>
+  <text x="700" y="1400" font-family="Hiragino Sans, Arial" font-size="48" fill="#666">簡単配車・GOより¥1,380お得</text>
+  
+  <!-- Driver Button -->
+  <rect x="424" y="1600" width="1200" height="280" rx="60" fill="white" filter="url(#shadow)"/>
+  <text x="550" y="1760" font-family="Arial" font-size="120">🚗</text>
+  <text x="700" y="1720" font-family="Hiragino Sans, Arial" font-size="72" font-weight="bold" fill="#333">ドライバーとして利用</text>
+  <text x="700" y="1800" font-family="Hiragino Sans, Arial" font-size="48" fill="#666">収益85%保証・月収+¥50,000</text>
+  
+  <!-- Features badges -->
+  <g transform="translate(1024, 2200)">
+    <rect x="-600" y="-80" width="280" height="160" rx="30" fill="rgba(255,255,255,0.2)"/>
+    <text x="-460" y="20" font-family="Arial" font-size="48" text-anchor="middle" fill="white">🤖 AI予測</text>
+    
+    <rect x="-260" y="-80" width="280" height="160" rx="30" fill="rgba(255,255,255,0.2)"/>
+    <text x="-120" y="20" font-family="Arial" font-size="48" text-anchor="middle" fill="white">🚆 電車連携</text>
+    
+    <rect x="80" y="-80" width="280" height="160" rx="30" fill="rgba(255,255,255,0.2)"/>
+    <text x="220" y="20" font-family="Arial" font-size="48" text-anchor="middle" fill="white">☔ 天気料金</text>
+    
+    <rect x="420" y="-80" width="280" height="160" rx="30" fill="rgba(255,255,255,0.2)"/>
+    <text x="560" y="20" font-family="Arial" font-size="48" text-anchor="middle" fill="white">💰 最安値</text>
+  </g>
+  
+  <!-- Footer -->
+  <text x="1024" y="2500" font-family="Hiragino Sans, Arial" font-size="56" text-anchor="middle" fill="rgba(255,255,255,0.8)">全国47都道府県対応</text>
+  <text x="1024" y="2580" font-family="Hiragino Sans, Arial" font-size="48" text-anchor="middle" fill="rgba(255,255,255,0.7)">24/7サポート • 隠れた料金なし</text>
+</svg>
