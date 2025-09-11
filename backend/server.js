@@ -91,6 +91,43 @@ app.use((req, res, next) => {
 });
 
 // ========================================
+// DATABASE SCHEMA MIGRATION
+// ========================================
+
+async function ensureDatabaseSchema() {
+  try {
+    console.log('🔧 Running database schema migration...');
+
+    // Create payments table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        payment_id VARCHAR(255) UNIQUE NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        currency VARCHAR(3) DEFAULT 'JPY',
+        provider VARCHAR(50) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Add missing payment_id column to bookings table
+    await pool.query(`
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_id VARCHAR(255)
+    `);
+
+    console.log('✅ Database schema migration completed');
+  } catch (error) {
+    console.log('⚠️ Database migration:', error.message);
+  }
+}
+
+// Run migration after database connection is established
+ensureDatabaseSchema();
+
+// ========================================
 // PAYMENT ROUTES INTEGRATION
 // ========================================
 
