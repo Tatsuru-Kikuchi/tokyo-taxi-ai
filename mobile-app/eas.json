@@ -1,16 +1,18 @@
 {
   "cli": {
-    "version": ">= 5.0.0",
-    "appVersionSource": "local"
+    "version": ">= 16.18.0",
+    "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
     "production": {
-      "node": "18.20.0",
-      "ios": {
-        "resourceClass": "m-medium",
-        "buildConfiguration": "Release",
-        "autoIncrement": true
-      }
+      "autoIncrement": true
     }
   },
   "submit": {
