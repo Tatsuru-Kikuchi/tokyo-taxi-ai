@@ -10,6 +10,7 @@
     "test": "echo 'Test mode' && exit 0"
   },
   "dependencies": {
+    "@paypayopa/paypayopa-sdk-node": "^0.2.0",
     "axios": "^1.11.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
