@@ -23,44 +23,11 @@ COPY main.py .
 # Create directory for JAGeocoder database
 RUN mkdir -p /app/jageocoder_data
 
-# Download and setup JAGeocoder database
-# This runs during build time to prepare the database
-RUN python -c "
-import jageocoder
-import os
-import urllib.request
-import zipfile
+# Create a setup script for JAGeocoder database
+RUN echo 'import jageocoder\nimport os\ndb_path = "/app/jageocoder_data"\nos.makedirs(db_path, exist_ok=True)\nprint("Downloading JAGeocoder database...")\ntry:\n    jageocoder.init(db_dir=db_path, download=True)\n    print("JAGeocoder database initialized successfully")\nexcept Exception as e:\n    print(f"Error initializing JAGeocoder: {e}")\n    print("JAGeocoder will be initialized at runtime")' > setup_jageocoder.py
 
-# Set the database path
-db_path = '/app/jageocoder_data'
-os.makedirs(db_path, exist_ok=True)
-
-print('Downloading JAGeocoder database...')
-# Download the latest database
-try:
-    # Initialize jageocoder - this will download the database automatically
-    jageocoder.init(db_dir=db_path, download=True)
-    print('JAGeocoder database initialized successfully')
-except Exception as e:
-    print(f'Error initializing JAGeocoder: {e}')
-    # Fallback: manual download if auto-download fails
-    try:
-        print('Attempting manual download...')
-        url = 'https://www.info-proto.com/static/jageocoder/latest/jukyo_all_v21.zip'
-        zip_path = '/tmp/jageocoder.zip'
-        urllib.request.urlretrieve(url, zip_path)
-        
-        # Extract the zip file
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(db_path)
-        
-        # Initialize with the extracted data
-        jageocoder.init(db_dir=db_path)
-        print('Manual JAGeocoder setup completed')
-    except Exception as e2:
-        print(f'Manual download also failed: {e2}')
-        print('JAGeocoder will be initialized at runtime')
-"
+# Run the setup script to download JAGeocoder database
+RUN python setup_jageocoder.py || echo "JAGeocoder setup failed, will retry at runtime"
 
 # Expose port 8000
 EXPOSE 8000
