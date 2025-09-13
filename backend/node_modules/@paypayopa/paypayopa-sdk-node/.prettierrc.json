@@ -1,0 +1,5 @@
+{
+  "brace_style": "no-collapse,preserve-inline",
+  "singleQuote": true,
+  "printWidth": 1000000
+}

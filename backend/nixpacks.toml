@@ -10,5 +10,3 @@ cmds = ["echo 'Build timestamp: $(date)' && ls -la"]
 [phases.start]
 cmd = "node server.js"
 
-[start]
-cmd = "node server.js"
