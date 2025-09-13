@@ -1,0 +1,25 @@
+2025-09-11T05:27:55.000000000Z [inf]  Starting Container
+2025-09-11T05:27:56.824107130Z [inf]  ✅ Loaded 8604 stations from file
+2025-09-11T05:27:56.824111420Z [err]  ⚠️ PayPay SDK not available: Cannot find module '/app/node_modules/@paypayopa/paypayopa-sdk-node/dist/src/lib/index.js'. Please verify that the package.json has a valid "main" entry
+2025-09-11T05:27:56.824115277Z [inf]  💳 Square Payment Service initialized
+2025-09-11T05:27:56.824119366Z [inf]  ⚠️ Backup service not found, skipping...
+2025-09-11T05:27:56.824123981Z [inf]  ⚠️ Tracking service not found, skipping...
+2025-09-11T05:27:56.824144868Z [inf]  ========================================
+2025-09-11T05:27:56.824150334Z [inf]  🚕 全国AIタクシー Backend v3.1.0
+2025-09-11T05:27:56.824154069Z [inf]  📡 Server running on port 3000
+2025-09-11T05:27:56.824157832Z [inf]  🌐 WebSocket ready for connections
+2025-09-11T05:27:56.824161591Z [inf]  💾 Database: Connected
+2025-09-11T05:27:56.824169005Z [inf]  💳 Payments:
+2025-09-11T05:27:56.824679663Z [inf]     Square: Configured
+2025-09-11T05:27:56.824684164Z [inf]     PayPay: Configured
+2025-09-11T05:27:56.824688511Z [inf]     Stripe: Not configured
+2025-09-11T05:27:56.824692777Z [inf]  🗾 Coverage: Nationwide Japan
+2025-09-11T05:27:56.824697567Z [inf]  🚇 Total Stations: 8604
+2025-09-11T05:27:56.824702677Z [inf]  📍 Prefectures: 19
+2025-09-11T05:27:56.824708064Z [inf]  👥 Online Drivers: 3
+2025-09-11T05:27:56.824712748Z [inf]  📊 Environment: production
+2025-09-11T05:27:56.824717031Z [inf]  🎯 Status: Ready for production with PayPay!
+2025-09-11T05:27:56.824723027Z [inf]  🔗 Health: http://localhost:3000/api/health
+2025-09-11T05:27:56.824727455Z [inf]  ========================================
+2025-09-11T05:27:56.824731837Z [inf]  ✅ Database connected: 2025-09-11T05:27:56.185Z
+2025-09-11T05:27:56.824735782Z [err]  Database initialization error: column "payment_id" referenced in foreign key constraint does not exist
