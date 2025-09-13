@@ -25,7 +25,16 @@ try {
 
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: process.env.NODE_ENV === 'production' ? {
+      rejectUnauthorized: false,
+      requestCert: false,
+      agent: false
+    } : false,
+    connectionTimeoutMillis: 30000,
+    idleTimeoutMillis: 30000,
+    max: 20,
+    min: 2,
+    acquireTimeoutMillis: 30000
   });
 
   console.log('Database pool created successfully');
@@ -49,115 +58,150 @@ try {
   if (fs.existsSync(stationsPath)) {
     const rawData = fs.readFileSync(stationsPath, 'utf8');
     stationsData = JSON.parse(rawData);
-    console.log(`✅ Loaded ${stationsData.length} stations from file`);
+    console.log(`Loaded ${stationsData.length} stations from file`);
   } else {
-    console.warn('⚠️ Station data file not found, using empty array');
+    console.warn('Station data file not found, using empty array');
   }
 } catch (error) {
-  console.error('❌ Failed to load station data:', error);
+  console.error('Failed to load station data:', error);
   stationsData = [];
 }
 
 // ========================================
-// DATABASE SCHEMA INITIALIZATION
+// DATABASE SCHEMA INITIALIZATION WITH RETRY
 // ========================================
-async function initializeDatabase() {
-  try {
-    console.log('🔧 Running database schema migration...');
+async function initializeDatabase(maxRetries = 5) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Running database schema migration... (attempt ${attempt}/${maxRetries})`);
 
-    // Create drivers table
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS drivers (
-        id SERIAL PRIMARY KEY,
-        driver_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
-        name VARCHAR(255),
-        current_lat DECIMAL(10,8),
-        current_lng DECIMAL(10,8),
-        is_online BOOLEAN DEFAULT false,
-        rating DECIMAL(3,2) DEFAULT 5.0,
-        total_rides INTEGER DEFAULT 0,
-        earnings_today DECIMAL(10,2) DEFAULT 0.00,
-        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+      // Wait between retries with exponential backoff
+      if (attempt > 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Max 10 seconds
+        console.log(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
 
-    // Create payments table FIRST (before bookings)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS payments (
-        id SERIAL PRIMARY KEY,
-        payment_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
-        amount DECIMAL(10,2) NOT NULL,
-        currency VARCHAR(3) DEFAULT 'JPY',
-        provider VARCHAR(50) NOT NULL,
-        status VARCHAR(50) DEFAULT 'pending',
-        payment_method VARCHAR(50),
-        transaction_id VARCHAR(255),
-        metadata JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+      // Test connection first
+      console.log('Testing database connection...');
+      const testResult = await pool.query('SELECT NOW() as current_time');
+      console.log('Database connection verified:', testResult.rows[0].current_time);
 
-    // Create bookings table
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS bookings (
-        id SERIAL PRIMARY KEY,
-        booking_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
-        customer_name VARCHAR(255),
-        customer_phone VARCHAR(20),
-        pickup_station VARCHAR(255),
-        pickup_lat DECIMAL(10,8),
-        pickup_lng DECIMAL(10,8),
-        destination VARCHAR(255),
-        destination_lat DECIMAL(10,8),
-        destination_lng DECIMAL(10,8),
-        distance_km DECIMAL(8,2),
-        fare DECIMAL(10,2),
-        status VARCHAR(50) DEFAULT 'pending',
-        driver_id INTEGER REFERENCES drivers(id),
-        payment_id VARCHAR(255) REFERENCES payments(payment_id),
-        booking_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        pickup_time TIMESTAMP,
-        dropoff_time TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    // Create refunds table (this was causing the original error)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS refunds (
-        id SERIAL PRIMARY KEY,
-        refund_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
-        payment_id VARCHAR(255) REFERENCES payments(payment_id),
-        amount DECIMAL(10,2),
-        reason TEXT,
-        status VARCHAR(50) DEFAULT 'pending',
-        processed_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    // Create indexes for performance
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_drivers_location ON drivers(current_lat, current_lng) WHERE is_online = true;
-      CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
-      CREATE INDEX IF NOT EXISTS idx_bookings_driver ON bookings(driver_id);
-      CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
-    `);
-
-    // Insert some mock drivers if none exist
-    const driverCount = await pool.query('SELECT COUNT(*) FROM drivers');
-    if (parseInt(driverCount.rows[0].count) === 0) {
+      // Create drivers table
       await pool.query(`
-        INSERT INTO drivers (driver_id, name, current_lat, current_lng, is_online, rating, earnings_today) VALUES
-        ('d1', 'Driver Tanaka', 35.6812, 139.7671, true, 4.8, 28500.00),
-        ('d2', 'Driver Suzuki', 35.6762, 139.7650, true, 4.9, 31200.00),
-        ('d3', 'Driver Yamamoto', 35.6698, 139.7755, false, 4.7, 19800.00)
+        CREATE TABLE IF NOT EXISTS drivers (
+          id SERIAL PRIMARY KEY,
+          driver_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+          name VARCHAR(255),
+          current_lat DECIMAL(10,8),
+          current_lng DECIMAL(10,8),
+          is_online BOOLEAN DEFAULT false,
+          rating DECIMAL(3,2) DEFAULT 5.0,
+          total_rides INTEGER DEFAULT 0,
+          earnings_today DECIMAL(10,2) DEFAULT 0.00,
+          last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
       `);
-      console.log('✅ Mock drivers inserted');
-    }
+      console.log('Drivers table ready');
 
-    console.log('✅ Database schema initialized successfully');
-  } catch (error) {
-    console.error('❌ Database initialization error:', error);
-    // Don't exit - let the server start even if DB setup fails partially
+      // Create payments table FIRST (before bookings)
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS payments (
+          id SERIAL PRIMARY KEY,
+          payment_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+          amount DECIMAL(10,2) NOT NULL,
+          currency VARCHAR(3) DEFAULT 'JPY',
+          provider VARCHAR(50) NOT NULL,
+          status VARCHAR(50) DEFAULT 'pending',
+          payment_method VARCHAR(50),
+          transaction_id VARCHAR(255),
+          metadata JSONB,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      console.log('Payments table ready');
+
+      // Create bookings table
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS bookings (
+          id SERIAL PRIMARY KEY,
+          booking_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+          customer_name VARCHAR(255),
+          customer_phone VARCHAR(20),
+          pickup_station VARCHAR(255),
+          pickup_lat DECIMAL(10,8),
+          pickup_lng DECIMAL(10,8),
+          destination VARCHAR(255),
+          destination_lat DECIMAL(10,8),
+          destination_lng DECIMAL(10,8),
+          distance_km DECIMAL(8,2),
+          fare DECIMAL(10,2),
+          status VARCHAR(50) DEFAULT 'pending',
+          driver_id INTEGER REFERENCES drivers(id),
+          payment_id VARCHAR(255) REFERENCES payments(payment_id),
+          booking_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          pickup_time TIMESTAMP,
+          dropoff_time TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      console.log('Bookings table ready');
+
+      // Create refunds table
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS refunds (
+          id SERIAL PRIMARY KEY,
+          refund_id VARCHAR(255) UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+          payment_id VARCHAR(255) REFERENCES payments(payment_id),
+          amount DECIMAL(10,2),
+          reason TEXT,
+          status VARCHAR(50) DEFAULT 'pending',
+          processed_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      console.log('Refunds table ready');
+
+      // Create indexes for performance
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_drivers_location ON drivers(current_lat, current_lng) WHERE is_online = true
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status)
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bookings_driver ON bookings(driver_id)
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)
+      `);
+      console.log('Database indexes ready');
+
+      // Insert mock drivers if none exist
+      const driverCount = await pool.query('SELECT COUNT(*) FROM drivers');
+      if (parseInt(driverCount.rows[0].count) === 0) {
+        await pool.query(`
+          INSERT INTO drivers (driver_id, name, current_lat, current_lng, is_online, rating, earnings_today) VALUES
+          ('d1', 'Driver Tanaka', 35.6812, 139.7671, true, 4.8, 28500.00),
+          ('d2', 'Driver Suzuki', 35.6762, 139.7650, true, 4.9, 31200.00),
+          ('d3', 'Driver Yamamoto', 35.6698, 139.7755, false, 4.7, 19800.00)
+        `);
+        console.log('Mock drivers inserted');
+      }
+
+      console.log('Database schema initialized successfully');
+      return; // Success - exit retry loop
+
+    } catch (error) {
+      console.error(`Database initialization attempt ${attempt} failed:`, error.message);
+
+      if (attempt === maxRetries) {
+        console.error('All database initialization attempts failed - continuing with server start');
+        return; // Don't crash server, continue anyway
+      }
+    }
   }
 }
 
@@ -169,19 +213,25 @@ async function initializeDatabase() {
 app.get('/api/health', async (req, res) => {
   try {
     // Test database connection
-    await pool.query('SELECT NOW()');
+    const result = await pool.query('SELECT NOW() as server_time');
+    const dbTime = result.rows[0].server_time;
+
     res.json({
       status: 'healthy',
       service: 'Tokyo AI Taxi Backend',
       version: '3.1.1',
       timestamp: new Date().toISOString(),
       database: 'connected',
+      database_time: dbTime,
       stations: stationsData.length
     });
   } catch (error) {
     res.status(500).json({
       status: 'unhealthy',
-      error: error.message
+      service: 'Tokyo AI Taxi Backend',
+      version: '3.1.1',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
@@ -198,6 +248,19 @@ app.get('/', (req, res) => {
       drivers: '/api/drivers',
       bookings: '/api/bookings'
     }
+  });
+});
+
+// Get all stations (limited)
+app.get('/api/stations', (req, res) => {
+  const { limit = 100, offset = 0 } = req.query;
+  const start = parseInt(offset);
+  const end = start + parseInt(limit);
+
+  res.json({
+    stations: stationsData.slice(start, end),
+    total: stationsData.length,
+    showing: Math.min(parseInt(limit), stationsData.length - start)
   });
 });
 
@@ -224,7 +287,8 @@ app.get('/api/stations/nearby', (req, res) => {
 
   res.json({
     stations: nearbyStations,
-    total: nearbyStations.length
+    total: nearbyStations.length,
+    user_location: { lat: userLat, lng: userLng }
   });
 });
 
@@ -240,7 +304,7 @@ app.get('/api/stations/search', (req, res) => {
   const results = stationsData
     .filter(station =>
       station.name.toLowerCase().includes(query) ||
-      station.prefecture.toLowerCase().includes(query)
+      (station.prefecture && station.prefecture.toLowerCase().includes(query))
     )
     .slice(0, parseInt(limit));
 
@@ -274,12 +338,14 @@ app.get('/api/drivers/nearby', async (req, res) => {
     `;
 
     const result = await pool.query(query, [parseFloat(lat), parseFloat(lng), parseInt(limit)]);
+
     res.json({
       drivers: result.rows,
-      total: result.rows.length
+      total: result.rows.length,
+      user_location: { lat: parseFloat(lat), lng: parseFloat(lng) }
     });
   } catch (error) {
-    console.error('Database query failed, using memory:', error.message);
+    console.error('Database query failed, using fallback:', error.message);
 
     // Fallback to mock data
     const mockDrivers = [
@@ -291,7 +357,8 @@ app.get('/api/drivers/nearby', async (req, res) => {
     res.json({
       drivers: mockDrivers,
       total: mockDrivers.length,
-      source: 'fallback'
+      source: 'fallback',
+      user_location: { lat: parseFloat(lat), lng: parseFloat(lng) }
     });
   }
 });
@@ -302,19 +369,46 @@ app.post('/api/drivers/:driverId/location', async (req, res) => {
   const { lat, lng } = req.body;
 
   if (!lat || !lng) {
-    return res.status(400).json({ error: 'lat and lng required' });
+    return res.status(400).json({ error: 'lat and lng required in request body' });
   }
 
   try {
-    await pool.query(
-      'UPDATE drivers SET current_lat = $1, current_lng = $2, last_updated = NOW() WHERE driver_id = $3',
+    const result = await pool.query(
+      'UPDATE drivers SET current_lat = $1, current_lng = $2, last_updated = NOW() WHERE driver_id = $3 RETURNING *',
       [parseFloat(lat), parseFloat(lng), driverId]
     );
 
-    res.json({ success: true });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    res.json({
+      success: true,
+      driver: result.rows[0]
+    });
   } catch (error) {
     console.error('Update driver location error:', error);
-    res.status(500).json({ error: 'Failed to update location' });
+    res.status(500).json({ error: 'Failed to update driver location' });
+  }
+});
+
+// Get driver by ID
+app.get('/api/drivers/:driverId', async (req, res) => {
+  const { driverId } = req.params;
+
+  try {
+    const result = await pool.query('SELECT * FROM drivers WHERE driver_id = $1', [driverId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    res.json({
+      driver: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Get driver error:', error);
+    res.status(500).json({ error: 'Failed to get driver' });
   }
 });
 
@@ -332,26 +426,53 @@ app.post('/api/bookings/create', async (req, res) => {
     fare
   } = req.body;
 
+  // Validate required fields
+  if (!customer_name || !pickup_station || !destination || !fare) {
+    return res.status(400).json({
+      error: 'Missing required fields: customer_name, pickup_station, destination, fare'
+    });
+  }
+
   try {
-    const distance_km = calculateDistance(pickup_lat, pickup_lng, destination_lat, destination_lng);
+    const distance_km = pickup_lat && pickup_lng && destination_lat && destination_lng
+      ? calculateDistance(pickup_lat, pickup_lng, destination_lat, destination_lng)
+      : null;
 
     const result = await pool.query(`
       INSERT INTO bookings (customer_name, customer_phone, pickup_station, pickup_lat, pickup_lng,
                            destination, destination_lat, destination_lng, distance_km, fare)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING booking_id
+      RETURNING *
     `, [customer_name, customer_phone, pickup_station, pickup_lat, pickup_lng,
         destination, destination_lat, destination_lng, distance_km, fare]);
 
     res.json({
       success: true,
-      booking_id: result.rows[0].booking_id,
-      distance_km,
-      fare
+      booking: result.rows[0]
     });
   } catch (error) {
     console.error('Booking creation error:', error);
     res.status(500).json({ error: 'Failed to create booking' });
+  }
+});
+
+// Get booking by ID
+app.get('/api/bookings/:bookingId', async (req, res) => {
+  const { bookingId } = req.params;
+
+  try {
+    const result = await pool.query('SELECT * FROM bookings WHERE booking_id = $1', [bookingId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    res.json({
+      booking: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Get booking error:', error);
+    res.status(500).json({ error: 'Failed to get booking' });
   }
 });
 
@@ -374,35 +495,43 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 // ========================================
 async function startServer() {
   try {
-    // Initialize database first
+    // Initialize database with retries
     await initializeDatabase();
 
-    // Start server
+    // Start HTTP server
     app.listen(port, () => {
       console.log('========================================');
-      console.log('🚕 全国AIタクシー Backend v3.1.1');
-      console.log(`🔡 Server running on port ${port}`);
-      console.log('🌐 WebSocket ready for connections');
-      console.log('💾 Database: Connected');
-      console.log('💳 Payment: Square configured');
-      console.log('🗾 Coverage: Nationwide Japan');
-      console.log(`🚇 Total Stations: ${stationsData.length}`);
-      console.log('📊 Environment: production');
-      console.log('🎯 Status: Ready for production!');
-      console.log(`🔗 Health: http://localhost:${port}/api/health`);
+      console.log('Tokyo AI Taxi Backend v3.1.1');
+      console.log(`Server running on port ${port}`);
+      console.log('WebSocket ready for connections');
+      console.log('Database: Connected');
+      console.log('Payment: Square configured');
+      console.log('Coverage: Nationwide Japan');
+      console.log(`Total Stations: ${stationsData.length}`);
+      console.log('Environment: production');
+      console.log('Status: Ready for production!');
+      console.log(`Health: http://localhost:${port}/api/health`);
       console.log('========================================');
     });
   } catch (error) {
-    console.error('❌ Server startup failed:', error);
+    console.error('Server startup failed:', error);
     process.exit(1);
   }
 }
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('🔴 SIGTERM received, shutting down gracefully...');
+  console.log('SIGTERM received, shutting down gracefully...');
   pool.end(() => {
-    console.log('🔴 Database connection closed');
+    console.log('Database connection closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  pool.end(() => {
+    console.log('Database connection closed');
     process.exit(0);
   });
 });
