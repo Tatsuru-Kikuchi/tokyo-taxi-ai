@@ -46,3 +46,7 @@ build/
 .env
 backups/
 *.swp
+*.swp
+*.swm
+*.swn
+*.swo
