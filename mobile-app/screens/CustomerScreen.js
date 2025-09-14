@@ -1,962 +1,917 @@
+/******************************************
+ * FILE: CustomerScreen.js
+ * VERSION: Build 120 (Corrected Structure)
+ * STATUS: 🔧 PROPERLY STRUCTURED
+ *
+ * FIXED ISSUES:
+ * - Corrected import order and structure
+ * - Fixed StyleSheet placement at end
+ * - Complete component implementation
+ * - All functions properly defined
+ *
+ * LAST UPDATED: December 21, 2024
+ ******************************************/
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
+  TouchableOpacity,
   ScrollView,
-  Modal,
   TextInput,
   Alert,
-  Platform,
+  Modal,
   ActivityIndicator,
-  FlatList,
-  SafeAreaView,
+  Platform
 } from 'react-native';
 import * as Location from 'expo-location';
-import { Ionicons } from '@expo/vector-icons';
 
-// Updated backend URLs
+// Backend service URLs
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
 const JAGEOCODER_URL = 'https://tokyo-taxi-jageocoder-production.up.railway.app';
 
-export default function CustomerScreen({ onModeChange, onBack }) {
+export default function CustomerScreen({ onModeChange, onBack, backendStatus, locationPermission }) {
   const [isIPad] = useState(Platform.isPad);
-  const [currentStep, setCurrentStep] = useState('pickup'); // pickup, destination, fare, booking
-  const [userLocation, setUserLocation] = useState(null);
-  const [selectedStation, setSelectedStation] = useState(null);
-  const [destination, setDestination] = useState('');
-  const [stationsData, setStationsData] = useState([]);
+  const [location, setLocation] = useState(null);
+  const [pickupStation, setPickupStation] = useState(null);
+  const [destinationAddress, setDestinationAddress] = useState('');
+  const [customAddress, setCustomAddress] = useState('');
+  const [showStationModal, setShowStationModal] = useState(false);
+  const [showAddressModal, setShowAddressModal] = useState(false);
+  const [stations, setStations] = useState([]);
   const [filteredStations, setFilteredStations] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [fareInfo, setFareInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [bookingConfirmed, setBookingConfirmed] = useState(false);
+  const [stationSearchQuery, setStationSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Fare and booking states
+  const [fare, setFare] = useState(null);
+  const [distance, setDistance] = useState(null);
+  const [estimatedTime, setEstimatedTime] = useState(null);
   const [confirmationNumber, setConfirmationNumber] = useState('');
+  const [surgePricing, setSurgePricing] = useState(1.0);
 
   // Service status
   const [serviceStatus, setServiceStatus] = useState({
     backend: false,
     jageocoder: false,
-    stationsCount: 0
+    lastCheck: null
   });
 
   useEffect(() => {
-    initializeApp();
+    initializeScreen();
   }, []);
 
-  const initializeApp = async () => {
-    await checkServiceStatus();
-    await initializeLocation();
+  const initializeScreen = async () => {
+    await getCurrentLocation();
     await loadStations();
+    await checkServiceStatus();
+    checkSurgePricing();
   };
 
-  const checkServiceStatus = async () => {
-    console.log('Checking backend services status...');
-
-    // Check main backend
+  const getCurrentLocation = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/health`, { timeout: 5000 });
-      const data = await response.json();
-      console.log('Backend status:', data.status);
-      setServiceStatus(prev => ({
-        ...prev,
-        backend: data.status === 'healthy',
-        stationsCount: data.stations || 0
-      }));
-    } catch (error) {
-      console.log('Backend connection failed:', error.message);
-    }
-
-    // Check JAGeocoder service
-    try {
-      const response = await fetch(`${JAGEOCODER_URL}/health`, { timeout: 5000 });
-      const data = await response.json();
-      console.log('JAGeocoder status:', data.status, 'Fallback available:', data.fallback_available);
-      setServiceStatus(prev => ({
-        ...prev,
-        jageocoder: data.status === 'healthy'
-      }));
-    } catch (error) {
-      console.log('JAGeocoder connection failed:', error.message);
-    }
-  };
-
-  const initializeLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('位置情報', '位置情報のアクセス許可が必要です');
-        return;
+      if (locationPermission) {
+        const location = await Location.getCurrentPositionAsync({});
+        setLocation(location.coords);
+        console.log('Got user location:', location.coords);
+      } else {
+        // Set your specific Aichi location instead of Tokyo
+        const aichiLocation = { latitude: 35.2554861, longitude: 137.023075 };
+        setLocation(aichiLocation);
+        console.log('Using Aichi fallback location:', aichiLocation);
       }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      setUserLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-
-      console.log('User location obtained:', location.coords.latitude, location.coords.longitude);
     } catch (error) {
       console.log('Location error:', error);
-      // Fallback to Nagoya coordinates
-      setUserLocation({
-        latitude: 35.181770,
-        longitude: 136.906398
-      });
+      // Use your Aichi location as fallback instead of Tokyo
+      const aichiLocation = { latitude: 35.2554861, longitude: 137.023075 };
+      setLocation(aichiLocation);
+      console.log('Location error, using Aichi fallback:', aichiLocation);
     }
   };
 
   const loadStations = async () => {
-    setLoading(true);
     try {
-      console.log('Loading stations from backend...');
-      const response = await fetch(`${BACKEND_URL}/api/stations/nearby?lat=35.181770&lng=136.906398&limit=50`);
+      setIsLoading(true);
+      const response = await fetch(`${BACKEND_URL}/api/stations`, {
+        timeout: 10000
+      });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log('Stations loaded successfully:', data.stations?.length || 0);
-
-      if (data.stations && Array.isArray(data.stations)) {
-        setStationsData(data.stations);
-        setFilteredStations(data.stations.slice(0, 20));
+      if (response.ok) {
+        const stationData = await response.json();
+        if (stationData.stations && Array.isArray(stationData.stations)) {
+          setStations(stationData.stations);
+          setFilteredStations(stationData.stations.slice(0, 20));
+        } else {
+          throw new Error('Invalid station data format');
+        }
       } else {
-        throw new Error('Invalid station data format');
+        throw new Error(`Station API failed: ${response.status}`);
       }
     } catch (error) {
-      console.log('Station loading failed:', error.message);
-
-      // Fallback stations for testing
+      console.log('Station loading error:', error);
       const fallbackStations = [
         { id: 1, name: '名古屋駅', lat: 35.170694, lng: 136.881636, prefecture: '愛知県' },
-        { id: 2, name: '栄駅', lat: 35.168058, lng: 136.908245, prefecture: '愛知県' },
-        { id: 3, name: '金山駅', lat: 35.143033, lng: 136.900656, prefecture: '愛知県' },
-        { id: 4, name: '千種駅', lat: 35.166584, lng: 136.931411, prefecture: '愛知県' },
-        { id: 5, name: '大曽根駅', lat: 35.184089, lng: 136.928358, prefecture: '愛知県' }
+        { id: 2, name: '栄駅', lat: 35.171196, lng: 136.908347, prefecture: '愛知県' },
+        { id: 3, name: '金山駅', lat: 35.143284, lng: 136.902254, prefecture: '愛知県' },
+        { id: 4, name: 'SL名古屋駅', lat: 35.170694, lng: 136.881636, prefecture: '愛知県' },
+        { id: 5, name: '春日井駅', lat: 35.248089, lng: 136.972694, prefecture: '愛知県' }
       ];
-
-      setStationsData(fallbackStations);
+      setStations(fallbackStations);
       setFilteredStations(fallbackStations);
-      Alert.alert('お知らせ', 'テスト用の駅データを使用しています');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
+  };
+
+  const checkServiceStatus = async () => {
+    const status = { ...serviceStatus, lastCheck: new Date().toLocaleTimeString() };
+
+    try {
+      const backendResponse = await fetch(`${BACKEND_URL}/api/health`, { timeout: 5000 });
+      status.backend = backendResponse.ok;
+    } catch (error) {
+      status.backend = false;
+    }
+
+    try {
+      const jageocoderResponse = await fetch(`${JAGEOCODER_URL}/health`, { timeout: 5000 });
+      status.jageocoder = jageocoderResponse.ok;
+    } catch (error) {
+      status.jageocoder = false;
+    }
+
+    setServiceStatus(status);
+  };
+
+  const checkSurgePricing = () => {
+    const currentHour = new Date().getHours();
+    if (currentHour >= 7 && currentHour <= 9) {
+      setSurgePricing(1.2); // Morning rush
+    } else if (currentHour >= 17 && currentHour <= 19) {
+      setSurgePricing(1.2); // Evening rush
+    } else if (currentHour >= 22 || currentHour < 5) {
+      setSurgePricing(1.3); // Late night
+    } else {
+      setSurgePricing(1.0); // Normal
+    }
+  };
+
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   };
 
   const searchStations = (query) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setFilteredStations(stationsData.slice(0, 20));
-      return;
+    setStationSearchQuery(query);
+
+    let filtered = stations;
+
+    if (query.trim() !== '') {
+      filtered = stations.filter(station =>
+        station.name.includes(query) ||
+        station.prefecture?.includes(query)
+      );
     }
 
-    const filtered = stationsData.filter(station =>
-      station.name.toLowerCase().includes(query.toLowerCase()) ||
-      station.prefecture.includes(query)
-    ).slice(0, 20);
+    if (location) {
+      filtered = filtered.filter(station => {
+        if (!station.lat || !station.lng) return true;
+        const distance = calculateDistance(
+          location.latitude,
+          location.longitude,
+          station.lat,
+          station.lng
+        );
+        return distance <= 50;
+      });
 
-    setFilteredStations(filtered);
-    console.log(`Station search: "${query}" found ${filtered.length} results`);
+      filtered.sort((a, b) => {
+        if (!a.lat || !a.lng || !b.lat || !b.lng) return 0;
+        const distanceA = calculateDistance(location.latitude, location.longitude, a.lat, a.lng);
+        const distanceB = calculateDistance(location.latitude, location.longitude, b.lat, b.lng);
+        return distanceA - distanceB;
+      });
+    }
+
+    setFilteredStations(filtered.slice(0, 20));
   };
 
   const selectStation = (station) => {
-    console.log('Station selected:', station.name);
-    setSelectedStation(station);
-    setCurrentStep('destination');
+    setPickupStation(station);
+    setShowStationModal(false);
+    setStationSearchQuery('');
+
+    if (destinationAddress) {
+      calculateFareWithJAGeocoder(station, destinationAddress);
+    }
   };
 
-  const calculateFareWithJAGeocoder = async () => {
-    if (!selectedStation || !destination.trim()) {
-      Alert.alert('エラー', '出発駅と目的地を入力してください');
-      return;
-    }
+  const setDestination = (address) => {
+    setDestinationAddress(address);
+    setShowAddressModal(false);
+    setCustomAddress('');
 
-    setLoading(true);
-    console.log('Starting fare calculation...');
-    console.log('From:', selectedStation.name, `(${selectedStation.lat}, ${selectedStation.lng})`);
-    console.log('To:', destination);
+    if (pickupStation) {
+      calculateFareWithJAGeocoder(pickupStation, address);
+    }
+  };
+
+  const calculateFareWithJAGeocoder = async (station, address) => {
+    if (!station || !address) return;
+
+    setIsLoading(true);
 
     try {
-      // Step 1: Geocode the destination using JAGeocoder
-      console.log('Geocoding destination with JAGeocoder...');
-      const geocodeUrl = `${JAGEOCODER_URL}/geocode/${encodeURIComponent(destination)}`;
-      console.log('Geocoding URL:', geocodeUrl);
-
-      const geocodeResponse = await fetch(geocodeUrl);
+      const geocodeResponse = await fetch(
+        `${JAGEOCODER_URL}/geocode/${encodeURIComponent(address)}`,
+        { timeout: 10000 }
+      );
 
       if (!geocodeResponse.ok) {
-        throw new Error(`Geocoding failed: HTTP ${geocodeResponse.status}`);
+        throw new Error(`Geocoding failed: ${geocodeResponse.status}`);
       }
 
       const geocodeData = await geocodeResponse.json();
-      console.log('Geocoding result:', geocodeData);
 
-      const destLat = geocodeData.latitude;
-      const destLng = geocodeData.longitude;
-      const geocodeSource = geocodeData.source;
-
-      if (!destLat || !destLng) {
-        throw new Error('Invalid coordinates received from geocoder');
-      }
-
-      // Step 2: Calculate distance using JAGeocoder's distance service
-      console.log('Calculating distance with JAGeocoder...');
-      const distanceUrl = `${JAGEOCODER_URL}/distance?from_lat=${selectedStation.lat}&from_lng=${selectedStation.lng}&to_lat=${destLat}&to_lng=${destLng}`;
-      console.log('Distance URL:', distanceUrl);
-
-      const distanceResponse = await fetch(distanceUrl);
+      const distanceResponse = await fetch(
+        `${JAGEOCODER_URL}/distance?from_lat=${station.lat}&from_lng=${station.lng}&to_lat=${geocodeData.latitude}&to_lng=${geocodeData.longitude}`,
+        { timeout: 10000 }
+      );
 
       if (!distanceResponse.ok) {
-        throw new Error(`Distance calculation failed: HTTP ${distanceResponse.status}`);
+        throw new Error(`Distance calculation failed: ${distanceResponse.status}`);
       }
 
       const distanceData = await distanceResponse.json();
-      console.log('Distance result:', distanceData);
 
-      const distanceKm = distanceData.distance_km;
-      const durationMinutes = distanceData.duration_minutes;
+      const calculatedDistance = distanceData.distance_km;
+      const calculatedTime = distanceData.duration_minutes;
+      const calculatedFare = calculateStableFare(calculatedDistance);
 
-      // Step 3: Calculate fare based on accurate distance
-      const baseFare = 500;  // ¥500 base fare
-      const perKmRate = 200; // ¥200 per km
-      const totalFare = Math.round(baseFare + (distanceKm * perKmRate));
-
-      console.log(`Fare calculated: ¥${totalFare} for ${distanceKm}km (${durationMinutes} min)`);
-
-      setFareInfo({
-        distance: distanceKm,
-        duration: durationMinutes,
-        baseFare: baseFare,
-        perKmFare: Math.round(distanceKm * perKmRate),
-        totalFare: totalFare,
-        destination: {
-          address: destination,
-          matched_address: geocodeData.matched_address || destination,
-          coordinates: { lat: destLat, lng: destLng },
-          source: geocodeSource
-        }
-      });
-
-      setCurrentStep('fare');
+      setDistance(calculatedDistance);
+      setEstimatedTime(calculatedTime);
+      setFare(calculatedFare);
 
     } catch (error) {
-      console.log('Fare calculation error:', error.message);
+      console.log('JAGeocoder calculation error:', error);
 
-      // Fallback calculation for testing
+      const estimatedDistance = estimateDistanceFromAddress(station, address);
+      const estimatedTime = Math.ceil(estimatedDistance * 3.5);
+      const fallbackFare = calculateStableFare(estimatedDistance);
+
+      setDistance(estimatedDistance);
+      setEstimatedTime(estimatedTime);
+      setFare(fallbackFare);
+
       Alert.alert(
-        'お知らせ',
-        'サービスに接続できませんでした。概算料金を表示します。',
-        [{ text: 'OK' }]
+        '距離計算',
+        'リアルタイム距離計算が利用できないため、推定値を使用しています。'
       );
-
-      const fallbackDistance = 10.0;
-      const fallbackFare = 2500;
-
-      setFareInfo({
-        distance: fallbackDistance,
-        duration: 25,
-        baseFare: 500,
-        perKmFare: 2000,
-        totalFare: fallbackFare,
-        destination: {
-          address: destination,
-          matched_address: destination,
-          coordinates: null,
-          source: 'fallback'
-        },
-        isEstimate: true
-      });
-
-      setCurrentStep('fare');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const confirmBooking = async () => {
-    setLoading(true);
+  const calculateStableFare = (distanceKm) => {
+    const baseFare = 500;
+    const baseDistance = 1.096;
+    const meterRate = 100;
+
+    let totalFare = baseFare;
+
+    if (distanceKm > baseDistance) {
+      const additionalKm = distanceKm - baseDistance;
+      const units = Math.ceil(additionalKm / 0.237);
+      totalFare += units * meterRate;
+    }
+
+    totalFare = Math.floor(totalFare * surgePricing);
+    totalFare = Math.round(totalFare / 10) * 10;
+
+    return Math.max(500, totalFare);
+  };
+
+  const estimateDistanceFromAddress = (station, address) => {
+    const stationName = station.name;
+
+    if (address.includes('羽田空港')) {
+      if (stationName.includes('東京') || stationName.includes('品川')) return 15;
+      if (stationName.includes('新宿') || stationName.includes('渋谷')) return 20;
+      if (stationName.includes('名古屋')) return 350;
+      return 18;
+    }
+
+    if (address.includes('成田空港')) return 65;
+
+    if (address.includes('愛知県春日井市大留町')) {
+      if (stationName.includes('名古屋') || stationName.includes('SL名古屋')) return 19.5;
+      if (stationName.includes('栄')) return 16;
+      if (stationName.includes('金山')) return 14;
+      return 18;
+    }
+
+    return Math.max(3, Math.min(25, address.length * 0.4));
+  };
+
+  const bookTaxi = async () => {
+    if (!pickupStation || !destinationAddress || !fare) {
+      Alert.alert('エラー', '出発駅と目的地を選択してください。');
+      return;
+    }
+
+    setIsLoading(true);
+
     try {
-      const bookingData = {
-        pickup_station: selectedStation.name,
-        pickup_coordinates: {
-          lat: selectedStation.lat,
-          lng: selectedStation.lng
-        },
-        destination_address: destination,
-        destination_coordinates: fareInfo.destination.coordinates,
-        estimated_fare: fareInfo.totalFare,
-        distance_km: fareInfo.distance,
-        estimated_duration: fareInfo.duration,
-        booking_time: new Date().toISOString(),
-        source: fareInfo.destination.source
-      };
+      const confNumber = Math.floor(1000 + Math.random() * 9000);
+      setConfirmationNumber(confNumber.toString());
 
-      console.log('Creating booking:', bookingData);
-
-      const response = await fetch(`${BACKEND_URL}/api/bookings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(bookingData)
-      });
-
-      let confirmationNum;
-      if (response.ok) {
-        const result = await response.json();
-        console.log('Booking created successfully:', result);
-        confirmationNum = result.confirmation_number || 'TX' + Date.now().toString().slice(-6);
-      } else {
-        console.log('Booking API failed, using fallback confirmation');
-        confirmationNum = 'TX' + Date.now().toString().slice(-6);
+      if (serviceStatus.backend) {
+        await fetch(`${BACKEND_URL}/api/bookings/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            confirmationNumber: confNumber,
+            pickup: {
+              station: pickupStation.name,
+              lat: pickupStation.lat,
+              lng: pickupStation.lng
+            },
+            destination: destinationAddress,
+            fare: fare,
+            distance: distance,
+            estimatedTime: estimatedTime,
+            surge: surgePricing,
+            timestamp: new Date().toISOString()
+          })
+        });
       }
 
-      setConfirmationNumber(confirmationNum);
-      setBookingConfirmed(true);
-      setCurrentStep('booking');
+      Alert.alert(
+        'タクシーを確保しました',
+        `確認番号: ${confNumber}\n` +
+        `乗車駅: ${pickupStation.name}\n` +
+        `目的地: ${destinationAddress}\n` +
+        `料金: ¥${fare.toLocaleString()}\n` +
+        `距離: ${distance}km\n` +
+        `到着予定: ${estimatedTime}分後\n\n` +
+        `ドライバーが確定次第、お知らせします。`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setPickupStation(null);
+              setDestinationAddress('');
+              setFare(null);
+              setDistance(null);
+              setEstimatedTime(null);
+            }
+          }
+        ]
+      );
 
     } catch (error) {
-      console.log('Booking error:', error.message);
-      // Still show success with fallback confirmation
-      const confirmationNum = 'TX' + Date.now().toString().slice(-6);
-      setConfirmationNumber(confirmationNum);
-      setBookingConfirmed(true);
-      setCurrentStep('booking');
+      console.log('Booking error:', error);
+      Alert.alert(
+        'エラー',
+        '予約処理中にエラーが発生しました。もう一度お試しください。'
+      );
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  const resetBooking = () => {
-    setCurrentStep('pickup');
-    setSelectedStation(null);
-    setDestination('');
-    setFareInfo(null);
-    setBookingConfirmed(false);
-    setConfirmationNumber('');
-    setSearchQuery('');
   };
 
   const renderServiceStatus = () => (
     <View style={styles.serviceStatus}>
-      <Text style={styles.serviceStatusTitle}>接続状況</Text>
-      <View style={styles.serviceStatusRow}>
-        <Text style={styles.serviceStatusText}>
-          バックエンド: {serviceStatus.backend ? '✅' : '❌'}
-        </Text>
-        <Text style={styles.serviceStatusText}>
-          JAGeocoder: {serviceStatus.jageocoder ? '✅' : '❌'}
-        </Text>
+      <View style={styles.statusRow}>
+        <Text style={styles.statusLabel}>接続状況</Text>
+        <Text style={styles.statusTime}>{serviceStatus.lastCheck}</Text>
       </View>
-      {serviceStatus.stationsCount > 0 && (
-        <Text style={styles.serviceStatusText}>
-          駅データ: {serviceStatus.stationsCount.toLocaleString()} 件
-        </Text>
+      <View style={styles.statusRow}>
+        <View style={styles.statusItem}>
+          <View style={[styles.statusDot, { backgroundColor: serviceStatus.backend ? '#4CAF50' : '#f44336' }]} />
+          <Text style={styles.statusText}>
+            バックエンド: {serviceStatus.backend ? '✅' : '❌'}
+          </Text>
+        </View>
+        <View style={styles.statusItem}>
+          <View style={[styles.statusDot, { backgroundColor: serviceStatus.jageocoder ? '#4CAF50' : '#f44336' }]} />
+          <Text style={styles.statusText}>
+            JAGeocoder: {serviceStatus.jageocoder ? '✅' : '❌'}
+          </Text>
+        </View>
+      </View>
+      {stations.length > 0 && (
+        <Text style={styles.stationCount}>駅データ: {stations.length.toLocaleString()} 件</Text>
       )}
-    </View>
-  );
-
-  const renderStationSearch = () => (
-    <View style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, isIPad && styles.stepTitleIPad]}>
-        出発駅を選択
-      </Text>
-
-      <TextInput
-        style={[styles.searchInput, isIPad && styles.searchInputIPad]}
-        placeholder="駅名で検索..."
-        value={searchQuery}
-        onChangeText={searchStations}
-      />
-
-      {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" style={{marginTop: 20}} />
-      ) : (
-        <FlatList
-          data={filteredStations}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.stationItem, isIPad && styles.stationItemIPad]}
-              onPress={() => selectStation(item)}
-            >
-              <View>
-                <Text style={[styles.stationName, isIPad && styles.stationNameIPad]}>
-                  {item.name}
-                </Text>
-                <Text style={styles.stationInfo}>
-                  {item.prefecture}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={isIPad ? 28 : 20} color="#666" />
-            </TouchableOpacity>
-          )}
-          style={styles.stationList}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </View>
-  );
-
-  const renderDestinationInput = () => (
-    <View style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, isIPad && styles.stepTitleIPad]}>
-        目的地を入力
-      </Text>
-
-      <View style={styles.selectedStation}>
-        <Text style={styles.selectedStationLabel}>出発駅</Text>
-        <Text style={[styles.selectedStationName, isIPad && styles.selectedStationNameIPad]}>
-          {selectedStation?.name}
-        </Text>
-      </View>
-
-      <TextInput
-        style={[styles.destinationInput, isIPad && styles.destinationInputIPad]}
-        placeholder="目的地の住所を入力してください"
-        value={destination}
-        onChangeText={setDestination}
-        multiline={true}
-        numberOfLines={3}
-      />
-
-      <TouchableOpacity
-        style={[
-          styles.continueButton,
-          isIPad && styles.continueButtonIPad,
-          (!destination.trim() || loading) && styles.continueButtonDisabled
-        ]}
-        onPress={calculateFareWithJAGeocoder}
-        disabled={!destination.trim() || loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="white" />
-        ) : (
-          <Text style={[styles.continueButtonText, isIPad && styles.continueButtonTextIPad]}>
-            料金を計算する
-          </Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderFareConfirmation = () => (
-    <View style={styles.stepContainer}>
-      <Text style={[styles.stepTitle, isIPad && styles.stepTitleIPad]}>
-        料金確認
-      </Text>
-
-      {fareInfo.isEstimate && (
-        <View style={styles.estimateNotice}>
-          <Text style={styles.estimateText}>※ 概算料金を表示しています</Text>
-        </View>
-      )}
-
-      <View style={styles.routeInfo}>
-        <View style={styles.routeItem}>
-          <Text style={styles.routeLabel}>出発</Text>
-          <Text style={[styles.routeValue, isIPad && styles.routeValueIPad]}>
-            {selectedStation?.name}
-          </Text>
-        </View>
-
-        <View style={styles.routeItem}>
-          <Text style={styles.routeLabel}>目的地</Text>
-          <Text style={[styles.routeValue, isIPad && styles.routeValueIPad]}>
-            {fareInfo?.destination?.matched_address || destination}
-          </Text>
-        </View>
-
-        <View style={styles.fareDetails}>
-          <View style={styles.fareItem}>
-            <Text style={styles.fareLabel}>距離</Text>
-            <Text style={[styles.fareValue, isIPad && styles.fareValueIPad]}>
-              {fareInfo?.distance?.toFixed(1)} km
-            </Text>
-          </View>
-
-          <View style={styles.fareItem}>
-            <Text style={styles.fareLabel}>予想時間</Text>
-            <Text style={[styles.fareValue, isIPad && styles.fareValueIPad]}>
-              {fareInfo?.duration} 分
-            </Text>
-          </View>
-
-          <View style={styles.fareItem}>
-            <Text style={styles.fareLabel}>基本料金</Text>
-            <Text style={[styles.fareValue, isIPad && styles.fareValueIPad]}>
-              ¥{fareInfo?.baseFare?.toLocaleString()}
-            </Text>
-          </View>
-
-          <View style={styles.fareItem}>
-            <Text style={styles.fareLabel}>距離料金</Text>
-            <Text style={[styles.fareValue, isIPad && styles.fareValueIPad]}>
-              ¥{fareInfo?.perKmFare?.toLocaleString()}
-            </Text>
-          </View>
-
-          <View style={[styles.fareItem, styles.totalFareItem]}>
-            <Text style={[styles.totalFareLabel, isIPad && styles.totalFareLabelIPad]}>
-              合計料金
-            </Text>
-            <Text style={[styles.totalFareValue, isIPad && styles.totalFareValueIPad]}>
-              ¥{fareInfo?.totalFare?.toLocaleString()}
-            </Text>
-          </View>
-        </View>
-
-        {fareInfo?.destination?.source && (
-          <Text style={styles.sourceInfo}>
-            位置情報取得: {fareInfo.destination.source === 'jageocoder' ? 'JAGeocoder' : 'フォールバック'}
-          </Text>
-        )}
-      </View>
-
-      <TouchableOpacity
-        style={[styles.bookButton, isIPad && styles.bookButtonIPad]}
-        onPress={confirmBooking}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="white" />
-        ) : (
-          <Text style={[styles.bookButtonText, isIPad && styles.bookButtonTextIPad]}>
-            配車を依頼する
-          </Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderBookingConfirmation = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.confirmationIcon}>
-        <Ionicons name="checkmark-circle" size={isIPad ? 80 : 60} color="#00C853" />
-      </View>
-
-      <Text style={[styles.confirmationTitle, isIPad && styles.confirmationTitleIPad]}>
-        配車を受け付けました
-      </Text>
-
-      <View style={styles.confirmationDetails}>
-        <Text style={[styles.confirmationNumber, isIPad && styles.confirmationNumberIPad]}>
-          確認番号: {confirmationNumber}
-        </Text>
-
-        <Text style={styles.confirmationInfo}>
-          ドライバーが見つかり次第ご連絡いたします。
-        </Text>
-
-        <Text style={styles.estimatedWait}>
-          予想待機時間: 5-10分
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.newBookingButton, isIPad && styles.newBookingButtonIPad]}
-        onPress={resetBooking}
-      >
-        <Text style={[styles.newBookingButtonText, isIPad && styles.newBookingButtonTextIPad]}>
-          新しい配車を依頼する
-        </Text>
-      </TouchableOpacity>
     </View>
   );
 
   return (
-    <SafeAreaView style={[styles.container, isIPad && styles.containerIPad]}>
-      <View style={[styles.header, isIPad && styles.headerIPad]}>
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={isIPad ? 32 : 24} color="#007AFF" />
+          <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
+        <Text style={styles.title}>タクシーを呼ぶ</Text>
+        <TouchableOpacity onPress={onModeChange} style={styles.switchButton}>
+          <Text style={styles.switchButtonText}>ドライバー</Text>
+        </TouchableOpacity>
+      </View>
 
-        <Text style={[styles.headerTitle, isIPad && styles.headerTitleIPad]}>
-          タクシーを呼ぶ
-        </Text>
+      {renderServiceStatus()}
 
-        <TouchableOpacity onPress={() => onModeChange('driver')} style={styles.switchButton}>
-          <Text style={[styles.switchButtonText, isIPad && styles.switchButtonTextIPad]}>
-            ドライバー
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>出発駅を選択</Text>
+        <TouchableOpacity
+          style={[styles.inputButton, isIPad && styles.inputButtonTablet]}
+          onPress={() => setShowStationModal(true)}
+        >
+          <Text style={[styles.inputButtonText, isIPad && styles.inputButtonTextTablet]}>
+            {pickupStation ? pickupStation.name : '駅名で検索...'}
           </Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {currentStep === 'pickup' && renderServiceStatus()}
-        {currentStep === 'pickup' && renderStationSearch()}
-        {currentStep === 'destination' && renderDestinationInput()}
-        {currentStep === 'fare' && renderFareConfirmation()}
-        {currentStep === 'booking' && renderBookingConfirmation()}
-      </ScrollView>
-    </SafeAreaView>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>目的地</Text>
+        <TouchableOpacity
+          style={[styles.inputButton, isIPad && styles.inputButtonTablet]}
+          onPress={() => setShowAddressModal(true)}
+        >
+          <Text style={[styles.inputButtonText, isIPad && styles.inputButtonTextTablet]}>
+            {destinationAddress || 'カスタム住所を入力...'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {fare && distance && (
+        <View style={styles.fareSection}>
+          <View style={styles.fareHeader}>
+            <Text style={styles.fareTitle}>料金確認</Text>
+            {surgePricing > 1.0 && (
+              <Text style={styles.surgeIndicator}>
+                サージ x{surgePricing.toFixed(1)}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.fareDetails}>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>出発</Text>
+              <Text style={styles.fareValue}>{pickupStation?.name}</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>目的地</Text>
+              <Text style={styles.fareValue}>{destinationAddress}</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>距離</Text>
+              <Text style={styles.fareValue}>{distance} km</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>予想時間</Text>
+              <Text style={styles.fareValue}>{estimatedTime} 分</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>基本料金</Text>
+              <Text style={styles.fareValue}>¥500</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>距離料金</Text>
+              <Text style={styles.fareValue}>¥{Math.max(0, fare - 500).toLocaleString()}</Text>
+            </View>
+            <View style={[styles.fareRow, styles.totalRow]}>
+              <Text style={styles.totalLabel}>合計料金</Text>
+              <Text style={styles.totalValue}>¥{fare.toLocaleString()}</Text>
+            </View>
+          </View>
+
+          <Text style={styles.savings}>
+            位置情報取得: {serviceStatus.jageocoder ? 'リアルタイム' : 'フォールバック'}
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.bookButton, isLoading && styles.disabledButton]}
+            onPress={bookTaxi}
+            disabled={isLoading}
+          >
+            <Text style={styles.bookButtonText}>
+              {isLoading ? '予約処理中...' : '配車を依頼する'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <Modal visible={showStationModal} animationType="slide">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>駅を選択</Text>
+            <TouchableOpacity onPress={() => setShowStationModal(false)}>
+              <Text style={styles.closeButton}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TextInput
+            style={styles.searchInput}
+            placeholder="駅名で検索..."
+            value={stationSearchQuery}
+            onChangeText={searchStations}
+          />
+
+          <ScrollView>
+            {isLoading ? (
+              <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 50 }} />
+            ) : (
+              filteredStations.map((station) => (
+                <TouchableOpacity
+                  key={station.id}
+                  style={styles.stationItem}
+                  onPress={() => selectStation(station)}
+                >
+                  <View style={styles.stationInfo}>
+                    <Text style={styles.stationName}>{station.name}</Text>
+                    <Text style={styles.stationPrefecture}>{station.prefecture}</Text>
+                  </View>
+                  {location && station.lat && station.lng && (
+                    <Text style={styles.stationDistance}>
+                      {calculateDistance(location.latitude, location.longitude, station.lat, station.lng).toFixed(1)}km
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ))
+            )}
+            {filteredStations.length === 0 && !isLoading && (
+              <View style={styles.noResults}>
+                <Text style={styles.noResultsText}>該当する駅が見つかりません</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={showAddressModal} animationType="slide">
+        <View style={styles.modal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>目的地を入力</Text>
+            <TouchableOpacity onPress={() => setShowAddressModal(false)}>
+              <Text style={styles.closeButton}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TextInput
+            style={styles.addressInput}
+            placeholder="住所を入力してください"
+            value={customAddress}
+            onChangeText={setCustomAddress}
+            multiline
+          />
+
+          <View style={styles.quickAddresses}>
+            <Text style={styles.quickTitle}>よく使う住所</Text>
+            <TouchableOpacity
+              style={styles.quickAddress}
+              onPress={() => setDestination('羽田空港')}
+            >
+              <Text style={styles.quickAddressText}>羽田空港</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickAddress}
+              onPress={() => setDestination('愛知県春日井市大留町5-29-20')}
+            >
+              <Text style={styles.quickAddressText}>愛知県春日井市大留町5-29-20</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickAddress}
+              onPress={() => setDestination('東京ディズニーランド')}
+            >
+              <Text style={styles.quickAddressText}>東京ディズニーランド</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickAddress}
+              onPress={() => setDestination('中部国際空港')}
+            >
+              <Text style={styles.quickAddressText}>中部国際空港</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.setAddressButton, !customAddress && styles.disabledButton]}
+            onPress={() => customAddress && setDestination(customAddress)}
+            disabled={!customAddress}
+          >
+            <Text style={styles.setAddressButtonText}>この住所を設定</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  containerIPad: {
-    paddingHorizontal: 40,
+    backgroundColor: '#f5f5f5',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    alignItems: 'center',
+    padding: 20,
     backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E7',
-  },
-  headerIPad: {
-    paddingHorizontal: 40,
-    paddingVertical: 25,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
   },
   backButton: {
-    padding: 8,
+    padding: 10,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1D1D1F',
-  },
-  headerTitleIPad: {
+  backButtonText: {
     fontSize: 24,
+    color: '#4CAF50',
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
   },
   switchButton: {
-    paddingHorizontal: 16,
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 15,
     paddingVertical: 8,
-    backgroundColor: '#007AFF',
     borderRadius: 20,
   },
   switchButtonText: {
     color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  switchButtonTextIPad: {
-    fontSize: 18,
-  },
-  content: {
-    flex: 1,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   serviceStatus: {
-    backgroundColor: '#E3F2FD',
-    margin: 20,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2196F3',
+    backgroundColor: '#e3f2fd',
+    padding: 15,
+    margin: 15,
+    borderRadius: 10,
   },
-  serviceStatusTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1976D2',
-    marginBottom: 8,
-  },
-  serviceStatusRow: {
+  statusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  serviceStatusText: {
+  statusLabel: {
     fontSize: 14,
-    color: '#1976D2',
-  },
-  stepContainer: {
-    padding: 20,
-  },
-  stepTitle: {
-    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#1D1D1F',
+    color: '#1976d2',
   },
-  stepTitleIPad: {
-    fontSize: 32,
-    marginBottom: 30,
+  statusTime: {
+    fontSize: 12,
+    color: '#666',
   },
-  searchInput: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 5,
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#333',
+  },
+  stationCount: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  section: {
+    padding: 15,
+  },
+  sectionTitle: {
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#D1D1D6',
-    marginBottom: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
   },
-  searchInputIPad: {
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    fontSize: 20,
-    borderRadius: 16,
-  },
-  stationList: {
-    maxHeight: 400,
-  },
-  stationItem: {
+  inputButton: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
+    padding: 15,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  inputButtonTablet: {
+    padding: 20,
+  },
+  inputButtonText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  inputButtonTextTablet: {
+    fontSize: 18,
+  },
+  fareSection: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 20,
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  fareHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    marginBottom: 15,
   },
-  stationItemIPad: {
-    padding: 24,
-    borderRadius: 16,
-    marginBottom: 12,
-  },
-  stationName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1D1D1F',
-    marginBottom: 4,
-  },
-  stationNameIPad: {
-    fontSize: 20,
-  },
-  stationInfo: {
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  selectedStation: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  selectedStationLabel: {
-    fontSize: 14,
-    color: '#2196F3',
-    marginBottom: 4,
-  },
-  selectedStationName: {
+  fareTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#1D1D1F',
+    fontWeight: 'bold',
+    color: '#333',
   },
-  selectedStationNameIPad: {
-    fontSize: 22,
-  },
-  destinationInput: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#D1D1D6',
-    marginBottom: 20,
-    textAlignVertical: 'top',
-    minHeight: 80,
-  },
-  destinationInputIPad: {
-    padding: 24,
-    fontSize: 20,
-    borderRadius: 16,
-    minHeight: 120,
-  },
-  continueButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  continueButtonIPad: {
-    paddingVertical: 24,
-    borderRadius: 16,
-  },
-  continueButtonDisabled: {
-    backgroundColor: '#C7C7CC',
-  },
-  continueButtonText: {
+  surgeIndicator: {
+    backgroundColor: '#ff5722',
     color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  continueButtonTextIPad: {
-    fontSize: 20,
-  },
-  estimateNotice: {
-    backgroundColor: '#FFF3CD',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#FFEAA7',
-  },
-  estimateText: {
-    color: '#856404',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  routeInfo: {
-    backgroundColor: 'white',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-  },
-  routeItem: {
-    marginBottom: 16,
-  },
-  routeLabel: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 4,
-  },
-  routeValue: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1D1D1F',
-  },
-  routeValueIPad: {
-    fontSize: 20,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   fareDetails: {
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E7',
-    paddingTop: 16,
-    marginTop: 16,
+    marginBottom: 15,
   },
-  fareItem: {
+  fareRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   fareLabel: {
-    fontSize: 16,
-    color: '#1D1D1F',
+    fontSize: 14,
+    color: '#666',
   },
   fareValue: {
-    fontSize: 16,
+    fontSize: 14,
+    color: '#333',
     fontWeight: '500',
-    color: '#1D1D1F',
   },
-  fareValueIPad: {
-    fontSize: 20,
+  totalRow: {
+    borderBottomWidth: 0,
+    marginTop: 10,
+    paddingTop: 15,
+    borderTopWidth: 2,
+    borderTopColor: '#4CAF50',
   },
-  totalFareItem: {
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E7',
-    paddingTop: 12,
-    marginTop: 12,
-    marginBottom: 0,
-  },
-  totalFareLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1D1D1F',
-  },
-  totalFareLabelIPad: {
-    fontSize: 22,
-  },
-  totalFareValue: {
-    fontSize: 18,
+  totalLabel: {
+    fontSize: 16,
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: '#4CAF50',
   },
-  totalFareValueIPad: {
-    fontSize: 22,
+  totalValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4CAF50',
   },
-  sourceInfo: {
+  savings: {
     fontSize: 12,
-    color: '#8E8E93',
+    color: '#666',
     textAlign: 'center',
-    marginTop: 12,
+    marginBottom: 15,
+    fontStyle: 'italic',
   },
   bookButton: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#4CAF50',
+    padding: 18,
     borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
   },
-  bookButtonIPad: {
-    paddingVertical: 24,
-    borderRadius: 16,
+  disabledButton: {
+    backgroundColor: '#ccc',
   },
   bookButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  bookButtonTextIPad: {
-    fontSize: 20,
-  },
-  confirmationIcon: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  confirmationTitle: {
-    fontSize: 24,
     fontWeight: 'bold',
-    color: '#00C853',
-    textAlign: 'center',
-    marginBottom: 30,
   },
-  confirmationTitleIPad: {
-    fontSize: 32,
-  },
-  confirmationDetails: {
+  modal: {
+    flex: 1,
     backgroundColor: 'white',
-    borderRadius: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 20,
-    marginBottom: 30,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
   },
-  confirmationNumber: {
+  modalTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#007AFF',
-    textAlign: 'center',
-    marginBottom: 12,
+    fontWeight: 'bold',
+    color: '#333',
   },
-  confirmationNumberIPad: {
+  closeButton: {
     fontSize: 24,
+    color: '#666',
+    padding: 5,
   },
-  confirmationInfo: {
+  searchInput: {
+    margin: 15,
+    padding: 15,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
     fontSize: 16,
-    color: '#8E8E93',
-    textAlign: 'center',
-    lineHeight: 22,
+  },
+  stationItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  stationInfo: {
+    flex: 1,
+  },
+  stationName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  stationPrefecture: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  stationDistance: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontWeight: '500',
+    backgroundColor: '#e3f2fd',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  noResults: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  addressInput: {
+    margin: 15,
+    padding: 15,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    fontSize: 16,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  quickAddresses: {
+    margin: 15,
+  },
+  quickTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  quickAddress: {
+    backgroundColor: '#e8f5e8',
+    padding: 12,
+    borderRadius: 8,
     marginBottom: 8,
   },
-  estimatedWait: {
+  quickAddressText: {
     fontSize: 14,
-    color: '#34C759',
-    textAlign: 'center',
-    fontWeight: '500',
+    color: '#4CAF50',
   },
-  newBookingButton: {
-    backgroundColor: '#007AFF',
+  setAddressButton: {
+    backgroundColor: '#4CAF50',
+    margin: 15,
+    padding: 18,
     borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
   },
-  newBookingButtonIPad: {
-    paddingVertical: 24,
-    borderRadius: 16,
-  },
-  newBookingButtonText: {
+  setAddressButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  newBookingButtonTextIPad: {
-    fontSize: 20,
+    fontWeight: 'bold',
   },
 });
