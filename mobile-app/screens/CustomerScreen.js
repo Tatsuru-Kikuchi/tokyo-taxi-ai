@@ -16,7 +16,7 @@ import {
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 
-// Backend URLs - Make sure these match your Railway services
+// Updated backend URLs
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
 const JAGEOCODER_URL = 'https://tokyo-taxi-jageocoder-production.up.railway.app';
 
@@ -34,42 +34,51 @@ export default function CustomerScreen({ onModeChange, onBack }) {
   const [bookingConfirmed, setBookingConfirmed] = useState(false);
   const [confirmationNumber, setConfirmationNumber] = useState('');
 
-  // Debug state
-  const [debugInfo, setDebugInfo] = useState({
-    backendConnected: false,
-    jagecoderConnected: false,
-    stationsLoaded: 0
+  // Service status
+  const [serviceStatus, setServiceStatus] = useState({
+    backend: false,
+    jageocoder: false,
+    stationsCount: 0
   });
 
   useEffect(() => {
-    initializeLocation();
-    loadStations();
-    testConnections();
+    initializeApp();
   }, []);
 
-  const testConnections = async () => {
-    console.log('Testing backend connections...');
+  const initializeApp = async () => {
+    await checkServiceStatus();
+    await initializeLocation();
+    await loadStations();
+  };
 
-    // Test main backend
+  const checkServiceStatus = async () => {
+    console.log('Checking backend services status...');
+
+    // Check main backend
     try {
       const response = await fetch(`${BACKEND_URL}/api/health`, { timeout: 5000 });
       const data = await response.json();
-      console.log('Main backend:', data);
-      setDebugInfo(prev => ({ ...prev, backendConnected: true }));
+      console.log('Backend status:', data.status);
+      setServiceStatus(prev => ({
+        ...prev,
+        backend: data.status === 'healthy',
+        stationsCount: data.stations || 0
+      }));
     } catch (error) {
-      console.log('Main backend error:', error.message);
-      setDebugInfo(prev => ({ ...prev, backendConnected: false }));
+      console.log('Backend connection failed:', error.message);
     }
 
-    // Test JAGeocoder service
+    // Check JAGeocoder service
     try {
       const response = await fetch(`${JAGEOCODER_URL}/health`, { timeout: 5000 });
       const data = await response.json();
-      console.log('JAGeocoder service:', data);
-      setDebugInfo(prev => ({ ...prev, jagecoderConnected: true }));
+      console.log('JAGeocoder status:', data.status, 'Fallback available:', data.fallback_available);
+      setServiceStatus(prev => ({
+        ...prev,
+        jageocoder: data.status === 'healthy'
+      }));
     } catch (error) {
-      console.log('JAGeocoder service error:', error.message);
-      setDebugInfo(prev => ({ ...prev, jagecoderConnected: false }));
+      console.log('JAGeocoder connection failed:', error.message);
     }
   };
 
@@ -90,10 +99,10 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         longitude: location.coords.longitude,
       });
 
-      console.log('User location:', location.coords);
+      console.log('User location obtained:', location.coords.latitude, location.coords.longitude);
     } catch (error) {
       console.log('Location error:', error);
-      // Use Nagoya as fallback
+      // Fallback to Nagoya coordinates
       setUserLocation({
         latitude: 35.181770,
         longitude: 136.906398
@@ -105,26 +114,25 @@ export default function CustomerScreen({ onModeChange, onBack }) {
     setLoading(true);
     try {
       console.log('Loading stations from backend...');
-      const response = await fetch(`${BACKEND_URL}/api/stations/nearby?lat=35.181770&lng=136.906398&limit=100`);
+      const response = await fetch(`${BACKEND_URL}/api/stations/nearby?lat=35.181770&lng=136.906398&limit=50`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('Stations loaded:', data.stations?.length || 0);
+      console.log('Stations loaded successfully:', data.stations?.length || 0);
 
       if (data.stations && Array.isArray(data.stations)) {
         setStationsData(data.stations);
         setFilteredStations(data.stations.slice(0, 20));
-        setDebugInfo(prev => ({ ...prev, stationsLoaded: data.stations.length }));
       } else {
-        throw new Error('Invalid stations data format');
+        throw new Error('Invalid station data format');
       }
     } catch (error) {
-      console.log('Station loading error:', error.message);
+      console.log('Station loading failed:', error.message);
 
-      // Fallback to hardcoded stations for testing
+      // Fallback stations for testing
       const fallbackStations = [
         { id: 1, name: '名古屋駅', lat: 35.170694, lng: 136.881636, prefecture: '愛知県' },
         { id: 2, name: '栄駅', lat: 35.168058, lng: 136.908245, prefecture: '愛知県' },
@@ -135,8 +143,6 @@ export default function CustomerScreen({ onModeChange, onBack }) {
 
       setStationsData(fallbackStations);
       setFilteredStations(fallbackStations);
-      setDebugInfo(prev => ({ ...prev, stationsLoaded: fallbackStations.length }));
-
       Alert.alert('お知らせ', 'テスト用の駅データを使用しています');
     } finally {
       setLoading(false);
@@ -156,33 +162,36 @@ export default function CustomerScreen({ onModeChange, onBack }) {
     ).slice(0, 20);
 
     setFilteredStations(filtered);
-    console.log(`Found ${filtered.length} stations for query: ${query}`);
+    console.log(`Station search: "${query}" found ${filtered.length} results`);
   };
 
   const selectStation = (station) => {
-    console.log('Selected station:', station.name);
+    console.log('Station selected:', station.name);
     setSelectedStation(station);
     setCurrentStep('destination');
   };
 
-  const calculateFare = async () => {
+  const calculateFareWithJAGeocoder = async () => {
     if (!selectedStation || !destination.trim()) {
       Alert.alert('エラー', '出発駅と目的地を入力してください');
       return;
     }
 
     setLoading(true);
-    console.log('Calculating fare...');
-    console.log('From:', selectedStation.name);
+    console.log('Starting fare calculation...');
+    console.log('From:', selectedStation.name, `(${selectedStation.lat}, ${selectedStation.lng})`);
     console.log('To:', destination);
 
     try {
-      // First, geocode the destination using JAGeocoder
+      // Step 1: Geocode the destination using JAGeocoder
       console.log('Geocoding destination with JAGeocoder...');
-      const geocodeResponse = await fetch(`${JAGEOCODER_URL}/geocode/${encodeURIComponent(destination)}`);
+      const geocodeUrl = `${JAGEOCODER_URL}/geocode/${encodeURIComponent(destination)}`;
+      console.log('Geocoding URL:', geocodeUrl);
+
+      const geocodeResponse = await fetch(geocodeUrl);
 
       if (!geocodeResponse.ok) {
-        throw new Error(`Geocoding failed: ${geocodeResponse.status}`);
+        throw new Error(`Geocoding failed: HTTP ${geocodeResponse.status}`);
       }
 
       const geocodeData = await geocodeResponse.json();
@@ -190,67 +199,81 @@ export default function CustomerScreen({ onModeChange, onBack }) {
 
       const destLat = geocodeData.latitude;
       const destLng = geocodeData.longitude;
+      const geocodeSource = geocodeData.source;
 
       if (!destLat || !destLng) {
-        throw new Error('Invalid geocoding result');
+        throw new Error('Invalid coordinates received from geocoder');
       }
 
-      // Calculate distance using JAGeocoder
-      console.log('Calculating distance...');
+      // Step 2: Calculate distance using JAGeocoder's distance service
+      console.log('Calculating distance with JAGeocoder...');
       const distanceUrl = `${JAGEOCODER_URL}/distance?from_lat=${selectedStation.lat}&from_lng=${selectedStation.lng}&to_lat=${destLat}&to_lng=${destLng}`;
       console.log('Distance URL:', distanceUrl);
 
       const distanceResponse = await fetch(distanceUrl);
 
       if (!distanceResponse.ok) {
-        throw new Error(`Distance calculation failed: ${distanceResponse.status}`);
+        throw new Error(`Distance calculation failed: HTTP ${distanceResponse.status}`);
       }
 
       const distanceData = await distanceResponse.json();
       console.log('Distance result:', distanceData);
 
-      const distanceKm = distanceData.distance_km || 0;
-      const baseFare = 500;
-      const perKmRate = 200;
-      const calculatedFare = Math.round(baseFare + (distanceKm * perKmRate));
+      const distanceKm = distanceData.distance_km;
+      const durationMinutes = distanceData.duration_minutes;
+
+      // Step 3: Calculate fare based on accurate distance
+      const baseFare = 500;  // ¥500 base fare
+      const perKmRate = 200; // ¥200 per km
+      const totalFare = Math.round(baseFare + (distanceKm * perKmRate));
+
+      console.log(`Fare calculated: ¥${totalFare} for ${distanceKm}km (${durationMinutes} min)`);
 
       setFareInfo({
         distance: distanceKm,
+        duration: durationMinutes,
         baseFare: baseFare,
         perKmFare: Math.round(distanceKm * perKmRate),
-        totalFare: calculatedFare,
-        estimatedTime: distanceData.duration_minutes || Math.round(distanceKm * 2.5),
+        totalFare: totalFare,
         destination: {
           address: destination,
-          coordinates: { lat: destLat, lng: destLng }
+          matched_address: geocodeData.matched_address || destination,
+          coordinates: { lat: destLat, lng: destLng },
+          source: geocodeSource
         }
       });
 
       setCurrentStep('fare');
-      console.log('Fare calculated:', calculatedFare, 'yen for', distanceKm, 'km');
 
     } catch (error) {
       console.log('Fare calculation error:', error.message);
 
-      // Fallback calculation
-      const fallbackDistance = 5.0;
-      const fallbackFare = 1500;
+      // Fallback calculation for testing
+      Alert.alert(
+        'お知らせ',
+        'サービスに接続できませんでした。概算料金を表示します。',
+        [{ text: 'OK' }]
+      );
+
+      const fallbackDistance = 10.0;
+      const fallbackFare = 2500;
 
       setFareInfo({
         distance: fallbackDistance,
+        duration: 25,
         baseFare: 500,
-        perKmFare: 1000,
+        perKmFare: 2000,
         totalFare: fallbackFare,
-        estimatedTime: 15,
         destination: {
           address: destination,
-          coordinates: null
+          matched_address: destination,
+          coordinates: null,
+          source: 'fallback'
         },
-        error: 'Fallback calculation used'
+        isEstimate: true
       });
 
       setCurrentStep('fare');
-      Alert.alert('お知らせ', '概算料金を表示しています');
     } finally {
       setLoading(false);
     }
@@ -260,17 +283,18 @@ export default function CustomerScreen({ onModeChange, onBack }) {
     setLoading(true);
     try {
       const bookingData = {
-        pickup_location: selectedStation.name,
+        pickup_station: selectedStation.name,
         pickup_coordinates: {
           lat: selectedStation.lat,
           lng: selectedStation.lng
         },
-        destination: destination,
+        destination_address: destination,
         destination_coordinates: fareInfo.destination.coordinates,
         estimated_fare: fareInfo.totalFare,
-        distance: fareInfo.distance,
-        estimated_time: fareInfo.estimatedTime,
-        booking_time: new Date().toISOString()
+        distance_km: fareInfo.distance,
+        estimated_duration: fareInfo.duration,
+        booking_time: new Date().toISOString(),
+        source: fareInfo.destination.source
       };
 
       console.log('Creating booking:', bookingData);
@@ -283,23 +307,25 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         body: JSON.stringify(bookingData)
       });
 
+      let confirmationNum;
       if (response.ok) {
         const result = await response.json();
-        console.log('Booking created:', result);
-        setConfirmationNumber(result.confirmation_number || 'TX' + Date.now().toString().slice(-6));
+        console.log('Booking created successfully:', result);
+        confirmationNum = result.confirmation_number || 'TX' + Date.now().toString().slice(-6);
       } else {
-        // Generate fallback confirmation number
-        setConfirmationNumber('TX' + Date.now().toString().slice(-6));
         console.log('Booking API failed, using fallback confirmation');
+        confirmationNum = 'TX' + Date.now().toString().slice(-6);
       }
 
+      setConfirmationNumber(confirmationNum);
       setBookingConfirmed(true);
       setCurrentStep('booking');
 
     } catch (error) {
       console.log('Booking error:', error.message);
       // Still show success with fallback confirmation
-      setConfirmationNumber('TX' + Date.now().toString().slice(-6));
+      const confirmationNum = 'TX' + Date.now().toString().slice(-6);
+      setConfirmationNumber(confirmationNum);
       setBookingConfirmed(true);
       setCurrentStep('booking');
     } finally {
@@ -316,6 +342,25 @@ export default function CustomerScreen({ onModeChange, onBack }) {
     setConfirmationNumber('');
     setSearchQuery('');
   };
+
+  const renderServiceStatus = () => (
+    <View style={styles.serviceStatus}>
+      <Text style={styles.serviceStatusTitle}>接続状況</Text>
+      <View style={styles.serviceStatusRow}>
+        <Text style={styles.serviceStatusText}>
+          バックエンド: {serviceStatus.backend ? '✅' : '❌'}
+        </Text>
+        <Text style={styles.serviceStatusText}>
+          JAGeocoder: {serviceStatus.jageocoder ? '✅' : '❌'}
+        </Text>
+      </View>
+      {serviceStatus.stationsCount > 0 && (
+        <Text style={styles.serviceStatusText}>
+          駅データ: {serviceStatus.stationsCount.toLocaleString()} 件
+        </Text>
+      )}
+    </View>
+  );
 
   const renderStationSearch = () => (
     <View style={styles.stepContainer}>
@@ -387,14 +432,14 @@ export default function CustomerScreen({ onModeChange, onBack }) {
           isIPad && styles.continueButtonIPad,
           (!destination.trim() || loading) && styles.continueButtonDisabled
         ]}
-        onPress={calculateFare}
+        onPress={calculateFareWithJAGeocoder}
         disabled={!destination.trim() || loading}
       >
         {loading ? (
           <ActivityIndicator color="white" />
         ) : (
           <Text style={[styles.continueButtonText, isIPad && styles.continueButtonTextIPad]}>
-            料金を確認する
+            料金を計算する
           </Text>
         )}
       </TouchableOpacity>
@@ -407,6 +452,12 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         料金確認
       </Text>
 
+      {fareInfo.isEstimate && (
+        <View style={styles.estimateNotice}>
+          <Text style={styles.estimateText}>※ 概算料金を表示しています</Text>
+        </View>
+      )}
+
       <View style={styles.routeInfo}>
         <View style={styles.routeItem}>
           <Text style={styles.routeLabel}>出発</Text>
@@ -418,7 +469,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         <View style={styles.routeItem}>
           <Text style={styles.routeLabel}>目的地</Text>
           <Text style={[styles.routeValue, isIPad && styles.routeValueIPad]}>
-            {destination}
+            {fareInfo?.destination?.matched_address || destination}
           </Text>
         </View>
 
@@ -433,7 +484,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
           <View style={styles.fareItem}>
             <Text style={styles.fareLabel}>予想時間</Text>
             <Text style={[styles.fareValue, isIPad && styles.fareValueIPad]}>
-              {fareInfo?.estimatedTime} 分
+              {fareInfo?.duration} 分
             </Text>
           </View>
 
@@ -460,6 +511,12 @@ export default function CustomerScreen({ onModeChange, onBack }) {
             </Text>
           </View>
         </View>
+
+        {fareInfo?.destination?.source && (
+          <Text style={styles.sourceInfo}>
+            位置情報取得: {fareInfo.destination.source === 'jageocoder' ? 'JAGeocoder' : 'フォールバック'}
+          </Text>
+        )}
       </View>
 
       <TouchableOpacity
@@ -496,6 +553,10 @@ export default function CustomerScreen({ onModeChange, onBack }) {
         <Text style={styles.confirmationInfo}>
           ドライバーが見つかり次第ご連絡いたします。
         </Text>
+
+        <Text style={styles.estimatedWait}>
+          予想待機時間: 5-10分
+        </Text>
       </View>
 
       <TouchableOpacity
@@ -508,25 +569,6 @@ export default function CustomerScreen({ onModeChange, onBack }) {
       </TouchableOpacity>
     </View>
   );
-
-  const renderDebugInfo = () => {
-    if (currentStep !== 'pickup') return null;
-
-    return (
-      <View style={styles.debugInfo}>
-        <Text style={styles.debugTitle}>接続状況</Text>
-        <Text style={styles.debugText}>
-          メインバックエンド: {debugInfo.backendConnected ? '✅' : '❌'}
-        </Text>
-        <Text style={styles.debugText}>
-          JAGeocoder: {debugInfo.jagecoderConnected ? '✅' : '❌'}
-        </Text>
-        <Text style={styles.debugText}>
-          駅データ: {debugInfo.stationsLoaded} 件
-        </Text>
-      </View>
-    );
-  };
 
   return (
     <SafeAreaView style={[styles.container, isIPad && styles.containerIPad]}>
@@ -547,8 +589,7 @@ export default function CustomerScreen({ onModeChange, onBack }) {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {renderDebugInfo()}
-
+        {currentStep === 'pickup' && renderServiceStatus()}
         {currentStep === 'pickup' && renderStationSearch()}
         {currentStep === 'destination' && renderDestinationInput()}
         {currentStep === 'fare' && renderFareConfirmation()}
@@ -607,6 +648,29 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  serviceStatus: {
+    backgroundColor: '#E3F2FD',
+    margin: 20,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  serviceStatusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976D2',
+    marginBottom: 8,
+  },
+  serviceStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  serviceStatusText: {
+    fontSize: 14,
+    color: '#1976D2',
   },
   stepContainer: {
     padding: 20,
@@ -729,6 +793,19 @@ const styles = StyleSheet.create({
   continueButtonTextIPad: {
     fontSize: 20,
   },
+  estimateNotice: {
+    backgroundColor: '#FFF3CD',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFEAA7',
+  },
+  estimateText: {
+    color: '#856404',
+    fontSize: 14,
+    textAlign: 'center',
+  },
   routeInfo: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -797,6 +874,12 @@ const styles = StyleSheet.create({
   totalFareValueIPad: {
     fontSize: 22,
   },
+  sourceInfo: {
+    fontSize: 12,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 12,
+  },
   bookButton: {
     backgroundColor: '#34C759',
     borderRadius: 12,
@@ -850,6 +933,13 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
     lineHeight: 22,
+    marginBottom: 8,
+  },
+  estimatedWait: {
+    fontSize: 14,
+    color: '#34C759',
+    textAlign: 'center',
+    fontWeight: '500',
   },
   newBookingButton: {
     backgroundColor: '#007AFF',
@@ -868,24 +958,5 @@ const styles = StyleSheet.create({
   },
   newBookingButtonTextIPad: {
     fontSize: 20,
-  },
-  debugInfo: {
-    backgroundColor: '#FFF3CD',
-    borderRadius: 8,
-    padding: 12,
-    margin: 20,
-    borderWidth: 1,
-    borderColor: '#FFEAA7',
-  },
-  debugTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#856404',
-    marginBottom: 8,
-  },
-  debugText: {
-    fontSize: 12,
-    color: '#856404',
-    marginBottom: 4,
   },
 });

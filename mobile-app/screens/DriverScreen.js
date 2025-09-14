@@ -15,8 +15,9 @@ import {
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 
-// Backend URL
+// Backend URLs
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
+const JAGEOCODER_URL = 'https://tokyo-taxi-jageocoder-production.up.railway.app';
 
 export default function DriverScreen({ onModeChange, onBack }) {
   const [isIPad] = useState(Platform.isPad);
@@ -30,12 +31,54 @@ export default function DriverScreen({ onModeChange, onBack }) {
   const [showDemandMap, setShowDemandMap] = useState(false);
   const [currentRideRequest, setCurrentRideRequest] = useState(null);
 
+  // Service status
+  const [serviceStatus, setServiceStatus] = useState({
+    backend: false,
+    jageocoder: false,
+    driversOnline: 0
+  });
+
   useEffect(() => {
-    initializeLocation();
+    initializeDriver();
     if (isOnline) {
       simulateRideRequests();
     }
   }, [isOnline]);
+
+  const initializeDriver = async () => {
+    await checkServiceStatus();
+    await initializeLocation();
+  };
+
+  const checkServiceStatus = async () => {
+    console.log('Checking driver services status...');
+
+    // Check main backend
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/health`, { timeout: 5000 });
+      const data = await response.json();
+      console.log('Backend status:', data.status);
+      setServiceStatus(prev => ({
+        ...prev,
+        backend: data.status === 'healthy'
+      }));
+    } catch (error) {
+      console.log('Backend connection failed:', error.message);
+    }
+
+    // Check JAGeocoder service
+    try {
+      const response = await fetch(`${JAGEOCODER_URL}/health`, { timeout: 5000 });
+      const data = await response.json();
+      console.log('JAGeocoder status:', data.status);
+      setServiceStatus(prev => ({
+        ...prev,
+        jageocoder: data.status === 'healthy'
+      }));
+    } catch (error) {
+      console.log('JAGeocoder connection failed:', error.message);
+    }
+  };
 
   const initializeLocation = async () => {
     try {
@@ -72,7 +115,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
 
   const updateDriverLocation = async (coords) => {
     try {
-      await fetch(`${BACKEND_URL}/api/drivers/location`, {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/location`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -84,7 +127,12 @@ export default function DriverScreen({ onModeChange, onBack }) {
           is_online: isOnline
         })
       });
-      console.log('Driver location updated');
+
+      if (response.ok) {
+        console.log('Driver location updated successfully');
+      } else {
+        console.log('Location update failed');
+      }
     } catch (error) {
       console.log('Location update error:', error.message);
     }
@@ -99,17 +147,17 @@ export default function DriverScreen({ onModeChange, onBack }) {
     }
 
     if (newStatus) {
-      Alert.alert('オンライン', 'ドライバーモードがオンになりました');
+      Alert.alert('オンライン', 'ドライバーモードがオンになりました。配車リクエストを受信できます。');
     } else {
-      Alert.alert('オフライン', 'ドライバーモードがオフになりました');
+      Alert.alert('オフライン', 'ドライバーモードがオフになりました。');
     }
   };
 
   const simulateRideRequests = () => {
     if (!isOnline) return;
 
-    // Simulate random ride requests
-    const timeout = Math.random() * 30000 + 10000; // 10-40 seconds
+    // Simulate ride requests every 20-40 seconds
+    const timeout = Math.random() * 20000 + 20000;
 
     setTimeout(() => {
       if (isOnline) {
@@ -117,32 +165,42 @@ export default function DriverScreen({ onModeChange, onBack }) {
           {
             id: 'req_001',
             pickup_location: '名古屋駅',
-            pickup_address: '愛知県名古屋市中村区名駅',
+            pickup_address: '愛知県名古屋市中村区名駅1-1-4',
             destination: '栄駅',
             estimated_fare: 1800,
             distance: 3.2,
             customer_name: '田中様',
-            estimated_time: 8
+            estimated_time: 12
           },
           {
             id: 'req_002',
             pickup_location: '金山駅',
-            pickup_address: '愛知県名古屋市中区金山',
-            destination: '名古屋空港',
-            estimated_fare: 4500,
+            pickup_address: '愛知県名古屋市中区金山1-17-18',
+            destination: '春日井市大留町',
+            estimated_fare: 3200,
             distance: 12.5,
             customer_name: '佐藤様',
-            estimated_time: 25
+            estimated_time: 35
           },
           {
             id: 'req_003',
             pickup_location: '栄駅',
-            pickup_address: '愛知県名古屋市中区栄',
-            destination: '覚王山',
+            pickup_address: '愛知県名古屋市中区栄3-4-5',
+            destination: '千種駅',
             estimated_fare: 2200,
             distance: 4.1,
             customer_name: '山田様',
-            estimated_time: 12
+            estimated_time: 15
+          },
+          {
+            id: 'req_004',
+            pickup_location: '大曽根駅',
+            pickup_address: '愛知県名古屋市東区大曽根3-14-35',
+            destination: '愛知県春日井市大留町5-29-20',
+            estimated_fare: 2800,
+            distance: 8.3,
+            customer_name: '鈴木様',
+            estimated_time: 25
           }
         ];
 
@@ -152,7 +210,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
 
         // Auto-accept if enabled
         if (autoAccept) {
-          setTimeout(() => acceptRide(randomRequest), 1000);
+          setTimeout(() => acceptRide(randomRequest), 2000);
         }
 
         // Continue simulation
@@ -161,18 +219,51 @@ export default function DriverScreen({ onModeChange, onBack }) {
     }, timeout);
   };
 
-  const acceptRide = (request) => {
+  const acceptRide = async (request) => {
     console.log('Accepting ride:', request.id);
     setShowRideRequest(false);
     setCurrentRideRequest(null);
 
-    // Update earnings
+    // Try to submit to backend
+    try {
+      const bookingData = {
+        pickup_location: request.pickup_location,
+        destination: request.destination,
+        estimated_fare: request.estimated_fare,
+        distance_km: request.distance,
+        customer_name: request.customer_name,
+        driver_id: 'driver_001',
+        status: 'accepted',
+        accepted_time: new Date().toISOString()
+      };
+
+      const response = await fetch(`${BACKEND_URL}/api/bookings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(bookingData)
+      });
+
+      if (response.ok) {
+        console.log('Ride booking recorded successfully');
+      } else {
+        console.log('Booking recording failed');
+      }
+    } catch (error) {
+      console.log('Booking recording error:', error.message);
+    }
+
+    // Update local stats
     setDailyEarnings(prev => prev + request.estimated_fare);
     setTotalRides(prev => prev + 1);
 
     Alert.alert(
-      '配車受付',
-      `${request.customer_name}の配車を受け付けました。\n料金: ¥${request.estimated_fare.toLocaleString()}`,
+      '配車受付完了',
+      `${request.customer_name}の配車を受け付けました。\n` +
+      `料金: ¥${request.estimated_fare.toLocaleString()}\n` +
+      `距離: ${request.distance}km\n` +
+      `予想時間: ${request.estimated_time}分`,
       [{ text: 'OK' }]
     );
   };
@@ -195,23 +286,30 @@ export default function DriverScreen({ onModeChange, onBack }) {
     <html>
     <head>
         <meta charset='utf-8' />
-        <title>需要マップ</title>
+        <title>需要マップ - ドライバー向け</title>
         <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
         <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
         <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
         <style>
-            body { margin: 0; padding: 0; font-family: sans-serif; }
+            body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
             #map { position: absolute; top: 0; bottom: 0; width: 100%; }
             .legend {
                 position: absolute;
                 top: 10px;
                 left: 10px;
-                background: rgba(255,255,255,0.9);
+                background: rgba(255,255,255,0.95);
                 padding: 15px;
-                border-radius: 8px;
+                border-radius: 12px;
                 font-size: 14px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.15);
                 z-index: 1000;
+                max-width: 280px;
+            }
+            .legend-title {
+                font-weight: 600;
+                margin-bottom: 12px;
+                color: #1D1D1F;
+                font-size: 16px;
             }
             .legend-item {
                 display: flex;
@@ -219,19 +317,32 @@ export default function DriverScreen({ onModeChange, onBack }) {
                 margin-bottom: 8px;
             }
             .legend-color {
-                width: 20px;
-                height: 20px;
+                width: 16px;
+                height: 16px;
                 border-radius: 50%;
-                margin-right: 8px;
+                margin-right: 10px;
+                border: 2px solid rgba(255,255,255,0.8);
             }
             .high-demand { background-color: #FF4444; }
             .medium-demand { background-color: #FF9800; }
             .your-location { background-color: #00C853; }
+            .stats-info {
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background: rgba(0,0,0,0.8);
+                color: white;
+                padding: 12px;
+                border-radius: 8px;
+                font-size: 13px;
+                z-index: 1000;
+            }
         </style>
     </head>
     <body>
         <div id='map'></div>
         <div class='legend'>
+            <div class='legend-title'>需要マップ</div>
             <div class='legend-item'>
                 <div class='legend-color high-demand'></div>
                 <span>高需要エリア (¥3,500/時)</span>
@@ -242,8 +353,14 @@ export default function DriverScreen({ onModeChange, onBack }) {
             </div>
             <div class='legend-item'>
                 <div class='legend-color your-location'></div>
-                <span>あなたの位置</span>
+                <span>あなたの現在地</span>
             </div>
+        </div>
+
+        <div class='stats-info'>
+            <div>オンライン: ${isOnline ? 'はい' : 'いいえ'}</div>
+            <div>本日の収入: ¥${dailyEarnings.toLocaleString()}</div>
+            <div>配車回数: ${totalRides}回</div>
         </div>
 
         <script>
@@ -257,65 +374,169 @@ export default function DriverScreen({ onModeChange, onBack }) {
             });
 
             map.on('load', function() {
-                // High demand areas (red circles)
+                // High demand areas (major stations and business districts)
                 const highDemandAreas = [
-                    { center: [136.906398, 35.181770], name: '名古屋駅周辺' },
-                    { center: [136.908245, 35.168058], name: '栄エリア' },
-                    { center: [136.900656, 35.143033], name: '金山駅周辺' }
+                    {
+                        center: [136.881636, 35.170694],
+                        name: '名古屋駅',
+                        details: 'ビジネス街・新幹線ターミナル',
+                        hourlyRate: '¥3,500',
+                        waitingPassengers: 12
+                    },
+                    {
+                        center: [136.908245, 35.168058],
+                        name: '栄エリア',
+                        details: 'ショッピング・エンターテインメント',
+                        hourlyRate: '¥3,200',
+                        waitingPassengers: 8
+                    },
+                    {
+                        center: [136.900656, 35.143033],
+                        name: '金山駅',
+                        details: '交通ハブ・オフィス街',
+                        hourlyRate: '¥2,900',
+                        waitingPassengers: 5
+                    }
                 ];
 
-                // Medium demand areas (orange circles)
+                // Medium demand areas
                 const mediumDemandAreas = [
-                    { center: [136.931411, 35.166584], name: '千種エリア' },
-                    { center: [136.928358, 35.184089], name: '大曽根エリア' },
-                    { center: [136.875656, 35.195033], name: '中村区役所前' }
+                    {
+                        center: [136.931411, 35.166584],
+                        name: '千種駅',
+                        details: '住宅・大学エリア',
+                        hourlyRate: '¥2,400',
+                        waitingPassengers: 3
+                    },
+                    {
+                        center: [136.928358, 35.184089],
+                        name: '大曽根駅',
+                        details: '住宅・商業エリア',
+                        hourlyRate: '¥2,600',
+                        waitingPassengers: 4
+                    },
+                    {
+                        center: [137.023075, 35.2554861],
+                        name: '春日井市大留町',
+                        details: '住宅エリア',
+                        hourlyRate: '¥2,200',
+                        waitingPassengers: 2
+                    }
                 ];
 
                 // Add high demand markers
                 highDemandAreas.forEach(area => {
-                    // Add demand circle
                     new mapboxgl.Marker({
                         color: '#FF4444',
-                        scale: 0.8
+                        scale: 1.2
                     })
                     .setLngLat(area.center)
-                    .setPopup(new mapboxgl.Popup().setHTML(
-                        '<h3>' + area.name + '</h3>' +
-                        '<p>需要レベル: <strong>高</strong></p>' +
-                        '<p>予想収入: <strong>¥3,500/時</strong></p>' +
-                        '<p>待機中の乗客: <strong>8人</strong></p>'
+                    .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(
+                        '<div style="padding: 8px; min-width: 200px;">' +
+                        '<h3 style="margin: 0 0 8px 0; color: #FF4444;">' + area.name + '</h3>' +
+                        '<p style="margin: 4px 0; font-size: 13px;">' + area.details + '</p>' +
+                        '<div style="border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">' +
+                        '<div><strong>予想収入:</strong> ' + area.hourlyRate + '/時</div>' +
+                        '<div><strong>待機中:</strong> ' + area.waitingPassengers + '人</div>' +
+                        '<div style="margin-top: 8px; padding: 4px 8px; background: #fff2f2; border-radius: 4px; font-size: 12px; color: #d32f2f;">高収入エリア</div>' +
+                        '</div>' +
+                        '</div>'
                     ))
                     .addTo(map);
+
+                    // Add demand circle
+                    map.addSource('high-demand-' + area.name, {
+                        'type': 'geojson',
+                        'data': {
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': area.center
+                            }
+                        }
+                    });
+
+                    map.addLayer({
+                        'id': 'high-demand-circle-' + area.name,
+                        'type': 'circle',
+                        'source': 'high-demand-' + area.name,
+                        'paint': {
+                            'circle-radius': 80,
+                            'circle-color': '#FF4444',
+                            'circle-opacity': 0.1,
+                            'circle-stroke-width': 2,
+                            'circle-stroke-color': '#FF4444',
+                            'circle-stroke-opacity': 0.4
+                        }
+                    });
                 });
 
                 // Add medium demand markers
                 mediumDemandAreas.forEach(area => {
                     new mapboxgl.Marker({
                         color: '#FF9800',
-                        scale: 0.6
+                        scale: 0.9
                     })
                     .setLngLat(area.center)
-                    .setPopup(new mapboxgl.Popup().setHTML(
-                        '<h3>' + area.name + '</h3>' +
-                        '<p>需要レベル: <strong>中</strong></p>' +
-                        '<p>予想収入: <strong>¥2,800/時</strong></p>' +
-                        '<p>待機中の乗客: <strong>3人</strong></p>'
+                    .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(
+                        '<div style="padding: 8px; min-width: 180px;">' +
+                        '<h3 style="margin: 0 0 8px 0; color: #FF9800;">' + area.name + '</h3>' +
+                        '<p style="margin: 4px 0; font-size: 13px;">' + area.details + '</p>' +
+                        '<div style="border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">' +
+                        '<div><strong>予想収入:</strong> ' + area.hourlyRate + '/時</div>' +
+                        '<div><strong>待機中:</strong> ' + area.waitingPassengers + '人</div>' +
+                        '<div style="margin-top: 8px; padding: 4px 8px; background: #fff8e1; border-radius: 4px; font-size: 12px; color: #f57c00;">中収入エリア</div>' +
+                        '</div>' +
+                        '</div>'
                     ))
                     .addTo(map);
+
+                    // Add demand circle
+                    map.addSource('med-demand-' + area.name, {
+                        'type': 'geojson',
+                        'data': {
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': area.center
+                            }
+                        }
+                    });
+
+                    map.addLayer({
+                        'id': 'med-demand-circle-' + area.name,
+                        'type': 'circle',
+                        'source': 'med-demand-' + area.name,
+                        'paint': {
+                            'circle-radius': 60,
+                            'circle-color': '#FF9800',
+                            'circle-opacity': 0.08,
+                            'circle-stroke-width': 1.5,
+                            'circle-stroke-color': '#FF9800',
+                            'circle-stroke-opacity': 0.3
+                        }
+                    });
                 });
 
                 // Add your location
                 new mapboxgl.Marker({
                     color: '#00C853',
-                    scale: 1.0
+                    scale: 1.1
                 })
                 .setLngLat([${center[0]}, ${center[1]}])
-                .setPopup(new mapboxgl.Popup().setHTML(
-                    '<h3>あなたの現在地</h3>' +
-                    '<p>オンライン状態: <strong>${isOnline ? 'オン' : 'オフ'}</strong></p>' +
-                    '<p>本日の収入: <strong>¥${dailyEarnings.toLocaleString()}</strong></p>'
+                .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(
+                    '<div style="padding: 8px;">' +
+                    '<h3 style="margin: 0 0 8px 0; color: #00C853;">あなたの現在地</h3>' +
+                    '<div><strong>ステータス:</strong> ${isOnline ? 'オンライン' : 'オフライン'}</div>' +
+                    '<div><strong>本日の収入:</strong> ¥${dailyEarnings.toLocaleString()}</div>' +
+                    '<div><strong>配車回数:</strong> ${totalRides}回</div>' +
+                    '<div><strong>評価:</strong> ${averageRating}★</div>' +
+                    '</div>'
                 ))
                 .addTo(map);
+
+                // Add navigation controls
+                map.addControl(new mapboxgl.NavigationControl(), 'top-right');
             });
         </script>
     </body>
@@ -323,31 +544,16 @@ export default function DriverScreen({ onModeChange, onBack }) {
     `;
   };
 
-  const renderStatsCard = () => (
-    <View style={[styles.card, isIPad && styles.cardIPad]}>
-      <Text style={[styles.cardTitle, isIPad && styles.cardTitleIPad]}>今日の実績</Text>
-
-      <View style={styles.statsRow}>
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
-            ¥{dailyEarnings.toLocaleString()}
-          </Text>
-          <Text style={styles.statLabel}>売上</Text>
-        </View>
-
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
-            {totalRides}
-          </Text>
-          <Text style={styles.statLabel}>配車回数</Text>
-        </View>
-
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
-            {averageRating}
-          </Text>
-          <Text style={styles.statLabel}>評価</Text>
-        </View>
+  const renderServiceStatus = () => (
+    <View style={styles.serviceStatus}>
+      <Text style={styles.serviceStatusTitle}>サービス状況</Text>
+      <View style={styles.serviceStatusRow}>
+        <Text style={styles.serviceStatusText}>
+          バックエンド: {serviceStatus.backend ? '✅' : '❌'}
+        </Text>
+        <Text style={styles.serviceStatusText}>
+          JAGeocoder: {serviceStatus.jageocoder ? '✅' : '❌'}
+        </Text>
       </View>
     </View>
   );
@@ -363,24 +569,55 @@ export default function DriverScreen({ onModeChange, onBack }) {
           onValueChange={toggleOnlineStatus}
           trackColor={{ false: '#C7C7CC', true: '#34C759' }}
           thumbColor={isOnline ? '#FFFFFF' : '#F4F3F4'}
+          style={isIPad && styles.switchIPad}
         />
       </View>
 
-      <Text style={styles.onlineStatus}>
+      <Text style={[styles.onlineStatus, isIPad && styles.onlineStatusIPad]}>
         {isOnline ? '🟢 オンライン - 配車受付中' : '🔴 オフライン'}
       </Text>
 
       {isOnline && (
         <View style={styles.autoAcceptContainer}>
-          <Text style={styles.autoAcceptLabel}>自動受付</Text>
+          <Text style={[styles.autoAcceptLabel, isIPad && styles.autoAcceptLabelIPad]}>自動受付</Text>
           <Switch
             value={autoAccept}
             onValueChange={setAutoAccept}
             trackColor={{ false: '#C7C7CC', true: '#007AFF' }}
             thumbColor={autoAccept ? '#FFFFFF' : '#F4F3F4'}
+            style={isIPad && styles.switchIPad}
           />
         </View>
       )}
+    </View>
+  );
+
+  const renderStatsCard = () => (
+    <View style={[styles.card, isIPad && styles.cardIPad]}>
+      <Text style={[styles.cardTitle, isIPad && styles.cardTitleIPad]}>今日の実績</Text>
+
+      <View style={styles.statsRow}>
+        <View style={styles.statItem}>
+          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
+            ¥{dailyEarnings.toLocaleString()}
+          </Text>
+          <Text style={[styles.statLabel, isIPad && styles.statLabelIPad]}>売上</Text>
+        </View>
+
+        <View style={styles.statItem}>
+          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
+            {totalRides}
+          </Text>
+          <Text style={[styles.statLabel, isIPad && styles.statLabelIPad]}>配車回数</Text>
+        </View>
+
+        <View style={styles.statItem}>
+          <Text style={[styles.statValue, isIPad && styles.statValueIPad]}>
+            {averageRating}
+          </Text>
+          <Text style={[styles.statLabel, isIPad && styles.statLabelIPad]}>評価</Text>
+        </View>
+      </View>
     </View>
   );
 
@@ -399,7 +636,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
             需要：高
           </Text>
         </View>
-        <Text style={styles.recommendationText}>
+        <Text style={[styles.recommendationText, isIPad && styles.recommendationTextIPad]}>
           ビジネス街での会議終了時間。予想収入: ¥3,500/時
         </Text>
       </View>
@@ -413,7 +650,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
             需要：中
           </Text>
         </View>
-        <Text style={styles.recommendationText}>
+        <Text style={[styles.recommendationText, isIPad && styles.recommendationTextIPad]}>
           ショッピングエリア。予想収入: ¥2,800/時
         </Text>
       </View>
@@ -422,7 +659,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
         style={[styles.demandMapButton, isIPad && styles.demandMapButtonIPad]}
         onPress={() => setShowDemandMap(true)}
       >
-        <Ionicons name="map" size={isIPad ? 24 : 20} color="#007AFF" />
+        <Ionicons name="map" size={isIPad ? 28 : 20} color="#007AFF" />
         <Text style={[styles.demandMapButtonText, isIPad && styles.demandMapButtonTextIPad]}>
           需要マップを表示
         </Text>
@@ -447,7 +684,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
         </View>
 
         <View style={styles.comparisonVs}>
-          <Text style={styles.vsText}>VS</Text>
+          <Text style={[styles.vsText, isIPad && styles.vsTextIPad]}>VS</Text>
         </View>
 
         <View style={styles.comparisonItem}>
@@ -587,6 +824,7 @@ export default function DriverScreen({ onModeChange, onBack }) {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {renderServiceStatus()}
         {renderOnlineCard()}
         {renderStatsCard()}
         {renderAIRecommendations()}
@@ -650,6 +888,28 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
+  serviceStatus: {
+    backgroundColor: '#E3F2FD',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    marginBottom: 16,
+  },
+  serviceStatusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976D2',
+    marginBottom: 8,
+  },
+  serviceStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  serviceStatusText: {
+    fontSize: 14,
+    color: '#1976D2',
+  },
   card: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -682,10 +942,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  switchIPad: {
+    transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }],
+  },
   onlineStatus: {
     fontSize: 16,
     color: '#8E8E93',
     marginBottom: 16,
+  },
+  onlineStatusIPad: {
+    fontSize: 20,
   },
   autoAcceptContainer: {
     flexDirection: 'row',
@@ -695,6 +961,9 @@ const styles = StyleSheet.create({
   autoAcceptLabel: {
     fontSize: 16,
     color: '#1D1D1F',
+  },
+  autoAcceptLabelIPad: {
+    fontSize: 20,
   },
   statsRow: {
     flexDirection: 'row',
@@ -716,6 +985,9 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 14,
     color: '#8E8E93',
+  },
+  statLabelIPad: {
+    fontSize: 18,
   },
   recommendationItem: {
     marginBottom: 16,
@@ -758,6 +1030,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#8E8E93',
     lineHeight: 20,
+  },
+  recommendationTextIPad: {
+    fontSize: 18,
   },
   demandMapButton: {
     flexDirection: 'row',
@@ -803,6 +1078,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#8E8E93',
+  },
+  vsTextIPad: {
+    fontSize: 20,
   },
   comparisonLabel: {
     fontSize: 14,
