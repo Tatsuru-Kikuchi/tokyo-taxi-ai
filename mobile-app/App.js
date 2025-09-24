@@ -37,6 +37,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import * as Location from 'expo-location';
+import Mapbox from '@rnmapbox/maps';
 import Constants from 'expo-constants';
 import CustomerScreen from './screens/CustomerScreen';
 import DriverScreen from './screens/DriverScreen';
@@ -44,6 +45,12 @@ import DriverScreen from './screens/DriverScreen';
 // Backend service URLs
 const BACKEND_URL = 'https://tokyo-taxi-ai-production.up.railway.app';
 const JAGEOCODER_URL = 'https://tokyo-taxi-jageocoder-production.up.railway.app';
+
+if (Constants.manifest?.extra?.mapboxAccessToken) {
+  Mapbox.setAccessToken(Constants.manifest.extra.mapboxAccessToken);
+} else {
+  console.warn("Mapbox Access Token not found in app.config.js 'extra' section.");
+}
 
 export default function App() {
   const [mode, setMode] = useState(null);
