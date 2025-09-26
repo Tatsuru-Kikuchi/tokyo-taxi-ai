@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "141",
+      "buildNumber": "142",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
@@ -82,8 +82,9 @@
       [
         "@rnmapbox/maps",
         {
-          "setIosActivitiesAtLaunch": true,
           "RNMapboxMapsImpl": "mapbox",
+          "iosAppDelegateSourceLanguage": "objc",
+          "setIosActivitiesAtLaunch": true,
           "setAndroidConfiguration": true,
           "iosAccessToken": "pk.eyJ1IjoidGF0c3VydS1raWt1Y2hpIiwiYSI6ImNtZmdrOWNuNDAxcHMya3E0Z3F6ZzR6ODYifQ.DgYnz9Iwp6SBEK_AXeAEWg",
           "androidAccessToken": "pk.eyJ1IjoidGF0c3VydS1raWt1Y2hpIiwiYSI6ImNtZmdrOWNuNDAxcHMya3E0Z3F6ZzR6ODYifQ.DgYnz9Iwp6SBEK_AXeAEWg"
