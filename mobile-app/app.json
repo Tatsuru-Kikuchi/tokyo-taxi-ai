@@ -13,6 +13,7 @@
       "backgroundColor": "#FFD700"
     },
     "ios": {
+      "appDelegateSourceLanguage": "objc",
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
