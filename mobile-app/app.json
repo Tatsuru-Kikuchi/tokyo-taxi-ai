@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "com.zenkoku.aitaxi",
-      "buildNumber": "142",
+      "buildNumber": "143",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "配車サービスのために位置情報を使用します",
